@@ -1,10 +1,11 @@
-# Python-generated files
+# Python
 __pycache__/
-*.py[oc]
-build/
-dist/
-wheels/
-*.egg-info
+*.py[cod]
+.venv/
 
-# Virtual environments
-.venv
+# Environment and sensitive files
+.env
+token.json
+
+# OS
+.DS_Store
