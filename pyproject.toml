@@ -6,7 +6,7 @@ readme = "README.md"
 requires-python = ">=3.13"
 license = "MIT"
 authors = [
-    { name = "migusdn", email = "migusdn@gamil.com" }
+    { name = "migusdn", email = "migusdn@gmail.com" }
 ]
 dependencies = [
     "fastmcp>=0.4.1",
