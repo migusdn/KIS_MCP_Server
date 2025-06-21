@@ -6,6 +6,10 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Verified on MseeP](https://mseep.ai/badge.svg)](https://mseep.ai/app/51ce86bd-d78d-48da-8227-1e5cf29157d5)
 
+<a href="https://glama.ai/mcp/servers/@migusdn/KIS_MCP_Server">
+  <img width="380" height="200" src="https://glama.ai/mcp/servers/@migusdn/KIS_MCP_Server/badge" alt="KIS REST API Server MCP server" />
+</a>
+
 한국투자증권(KIS)의 REST API를 사용하여 주식 거래 및 시세 정보를 조회하는 MCP(Model Context Protocol) 서버입니다. 국내 및 해외 주식 거래, 시세 조회, 계좌 관리 등 다양한 금융 거래 기능을 제공합니다.
 
 ## ✨ 주요 기능
