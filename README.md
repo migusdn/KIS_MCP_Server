@@ -1,3 +1,5 @@
+[![MseeP.ai Security Assessment Badge](https://mseep.net/pr/migusdn-kis-mcp-server-badge.png)](https://mseep.ai/app/migusdn-kis-mcp-server)
+
 # 한국투자증권 REST API MCP (Model Context Protocol)
 
 [![Python 3.13+](https://img.shields.io/badge/python-3.13+-blue.svg)](https://www.python.org/downloads/)
