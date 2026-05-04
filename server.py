@@ -446,13 +446,186 @@ def _select_api_domain(spec: dict[str, Any], tr_id: str | None, env_dv: str | No
     return DOMAIN
 
 
-def _select_tr_id(spec: dict[str, Any], tr_id: str | None = None, env_dv: str | None = None) -> str | None:
+def _norm_lookup(payload: dict[str, Any], *names: str) -> str:
+    for name in names:
+        for key in {name, name.lower(), name.upper()}:
+            if key in payload and payload[key] is not None:
+                return str(payload[key])
+    return ""
+
+
+def _norm_side(value: str) -> str:
+    normalized = value.strip().lower()
+    if normalized in {"buy", "b", "02", "2", "매수"}:
+        return "buy"
+    if normalized in {"sell", "s", "01", "1", "매도"}:
+        return "sell"
+    return normalized
+
+
+def _virtualize_tr_id(tr_id: str, env_dv: str | None = None) -> str:
+    if _env_is_virtual(env_dv) and tr_id and tr_id[0] in {"T", "J", "C"}:
+        return "V" + tr_id[1:]
+    return tr_id
+
+
+def _infer_tr_id_from_payload(spec: dict[str, Any], payload: dict[str, Any], env_dv: str | None) -> str | None:
+    key = (spec["group"], spec["api_type"])
+
+    if key == ("domestic_stock", "order_cash"):
+        side = _norm_side(_norm_lookup(payload, "ORD_DV"))
+        mapping = {
+            "sell": "TTTC0011U",
+            "buy": "TTTC0012U",
+        }
+        if side in mapping:
+            return _virtualize_tr_id(mapping[side], env_dv)
+
+    if key == ("domestic_stock", "order_credit"):
+        side = _norm_side(_norm_lookup(payload, "ORD_DV"))
+        mapping = {
+            "buy": "TTTC0052U",
+            "sell": "TTTC0051U",
+        }
+        if side in mapping:
+            return mapping[side]
+
+    if key == ("domestic_stock", "inquire_daily_ccld"):
+        period = _norm_lookup(payload, "PD_DV").strip().lower()
+        mapping = {
+            "before": "CTSC9215R",
+            "inner": "TTTC0081R",
+        }
+        if period in mapping:
+            return _virtualize_tr_id(mapping[period], env_dv)
+
+    if key == ("domestic_stock", "order_resv_rvsecncl"):
+        order_type = _norm_lookup(payload, "ORD_TYPE").strip().lower()
+        mapping = {
+            "cancel": "CTSC0009U",
+            "modify": "CTSC0013U",
+        }
+        if order_type in mapping:
+            return mapping[order_type]
+
+    if key == ("domestic_futureoption", "order"):
+        day = _norm_lookup(payload, "ORD_DV").strip().lower()
+        if _env_is_virtual(env_dv) and day == "day":
+            return "VTTO1101U"
+        mapping = {
+            "day": "TTTO1101U",
+            "night": "STTN1101U",
+        }
+        if day in mapping and not _env_is_virtual(env_dv):
+            return mapping[day]
+        if day == "night" and _env_is_virtual(env_dv):
+            raise ValueError("domestic_futureoption.order demo environment supports only day orders")
+
+    if key == ("domestic_futureoption", "order_rvsecncl"):
+        day = _norm_lookup(payload, "DAY_DV").strip().lower()
+        if _env_is_virtual(env_dv) and day == "day":
+            return "VTTO1103U"
+        mapping = {
+            "day": "TTTO1103U",
+            "night": "TTTN1103U",
+        }
+        if day in mapping and not _env_is_virtual(env_dv):
+            return mapping[day]
+        if day == "night" and _env_is_virtual(env_dv):
+            raise ValueError("domestic_futureoption.order_rvsecncl demo environment supports only day orders")
+
+    if key == ("overseas_futureoption", "order_rvsecncl"):
+        order_division = _norm_lookup(payload, "ORD_DV").strip().lower()
+        mapping = {
+            "0": "OTFM3002U",
+            "modify": "OTFM3002U",
+            "1": "OTFM3003U",
+            "cancel": "OTFM3003U",
+        }
+        if order_division in mapping:
+            return mapping[order_division]
+
+    if key == ("overseas_stock", "daytime_order"):
+        side = _norm_side(_norm_lookup(payload, "ORDER_DV"))
+        mapping = {
+            "buy": "TTTS6036U",
+            "sell": "TTTS6037U",
+        }
+        if side in mapping:
+            return mapping[side]
+
+    if key == ("overseas_stock", "order"):
+        side = _norm_side(_norm_lookup(payload, "ORD_DV"))
+        market = _norm_lookup(payload, "OVRS_EXCG_CD").strip().upper()
+        market_group = {
+            "NASD": "us",
+            "NYSE": "us",
+            "AMEX": "us",
+            "SEHK": "hk",
+            "SHAA": "sh",
+            "SZAA": "sz",
+            "TKSE": "jp",
+            "HASE": "vn",
+            "VNSE": "vn",
+        }.get(market)
+        mapping = {
+            ("us", "buy"): "TTTT1002U",
+            ("us", "sell"): "TTTT1006U",
+            ("hk", "buy"): "TTTS1002U",
+            ("hk", "sell"): "TTTS1001U",
+            ("sh", "buy"): "TTTS0202U",
+            ("sh", "sell"): "TTTS1005U",
+            ("sz", "buy"): "TTTS0305U",
+            ("sz", "sell"): "TTTS0304U",
+            ("jp", "buy"): "TTTS0308U",
+            ("jp", "sell"): "TTTS0307U",
+            ("vn", "buy"): "TTTS0311U",
+            ("vn", "sell"): "TTTS0310U",
+        }
+        selected = mapping.get((market_group, side))
+        if selected:
+            return _virtualize_tr_id(selected, env_dv)
+
+    if key == ("overseas_stock", "order_resv"):
+        order_type = _norm_lookup(payload, "ORD_DV").strip()
+        mapping = {
+            "usBuy": "TTTT3014U",
+            "usSell": "TTTT3016U",
+            "asia": "TTTS3013U",
+        }
+        if order_type in mapping:
+            return _virtualize_tr_id(mapping[order_type], env_dv)
+
+    if key == ("overseas_stock", "order_resv_list"):
+        nation = _norm_lookup(payload, "NAT_DV").strip().lower()
+        mapping = {
+            "us": "TTTT3039R",
+            "asia": "TTTS3014R",
+        }
+        if nation in mapping:
+            return mapping[nation]
+
+    return None
+
+
+def _select_tr_id(
+    spec: dict[str, Any],
+    tr_id: str | None = None,
+    env_dv: str | None = None,
+    payload: dict[str, Any] | None = None,
+) -> str | None:
     if tr_id:
         return tr_id
 
     candidates = spec.get("tr_ids", [])
     if not candidates:
         return None
+
+    if payload is not None:
+        inferred = _infer_tr_id_from_payload(spec, payload, env_dv)
+        if inferred:
+            return inferred
+
     if len(candidates) == 1:
         return candidates[0]
 
@@ -462,7 +635,7 @@ def _select_tr_id(spec: dict[str, Any], tr_id: str | None = None, env_dv: str | 
         return filtered[0]
 
     raise ValueError(
-        f"{spec['group']}.{spec['api_type']} has multiple TR_ID candidates. "
+        f"{spec['group']}.{spec['api_type']} has multiple TR_ID candidates and could not infer one. "
         f"Pass tr_id explicitly. candidates={', '.join(candidates)}"
     )
 
@@ -599,7 +772,7 @@ async def call_kis_api(
 ):
     spec = get_kis_api_spec_record(group, api_type)
     payload = _prepare_api_payload(spec, params)
-    selected_tr_id = _select_tr_id(spec, tr_id=tr_id, env_dv=env_dv)
+    selected_tr_id = _select_tr_id(spec, tr_id=tr_id, env_dv=env_dv, payload=payload)
     base_url = _select_api_domain(spec, selected_tr_id, env_dv, domain)
     url = f"{base_url}{spec['path']}"
 

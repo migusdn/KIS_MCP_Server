@@ -156,7 +156,7 @@ class KisRequestTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(client.calls[0]["params"]["CANO"], "12345678")
         self.assertEqual(client.calls[0]["params"]["ACNT_PRDT_CD"], "22")
 
-    async def test_generic_post_requires_explicit_trid_when_ambiguous(self):
+    async def test_generic_post_requires_explicit_trid_when_side_is_unknown(self):
         with patch.dict(
             os.environ,
             {"KIS_ACCOUNT_TYPE": "REAL", "KIS_CANO": "12345678", "KIS_ACNT_PRDT_CD": "01"},
@@ -168,7 +168,7 @@ class KisRequestTests(unittest.IsolatedAsyncioTestCase):
                     "order_cash",
                     {
                         "excg_id_dvsn_cd": "KRX",
-                        "ord_dv": "buy",
+                        "ord_dv": "hold",
                         "ord_dvsn": "00",
                         "ord_qty": "1",
                         "ord_unpr": "70000",
@@ -201,7 +201,6 @@ class KisRequestTests(unittest.IsolatedAsyncioTestCase):
                     "ord_unpr": "70000",
                     "pdno": "005930",
                 },
-                tr_id="TTTC0012U",
             )
 
         self.assertEqual(result, {"rt_cd": "0"})
@@ -210,6 +209,102 @@ class KisRequestTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(client.calls[0]["headers"]["hashkey"], "hash")
         self.assertEqual(client.calls[0]["json"]["CANO"], "12345678")
         self.assertEqual(client.calls[0]["json"]["PDNO"], "005930")
+
+    async def test_generic_post_infers_virtual_domestic_sell_trid(self):
+        env = {
+            "KIS_APP_KEY": "app",
+            "KIS_APP_SECRET": "secret",
+            "KIS_ACCOUNT_TYPE": "VIRTUAL",
+            "KIS_CANO": "12345678",
+            "KIS_ACNT_PRDT_CD": "01",
+        }
+        client = StubClient(StubResponse({"rt_cd": "0"}))
+
+        with patch.dict(os.environ, env, clear=True), \
+             patch.object(server, "get_http_client", AsyncMock(return_value=client)), \
+             patch.object(server, "get_access_token", AsyncMock(return_value="token")), \
+             patch.object(server, "get_hashkey", AsyncMock(return_value="hash")):
+            await server.call_kis_api(
+                "domestic_stock",
+                "order_cash",
+                {
+                    "excg_id_dvsn_cd": "KRX",
+                    "ord_dv": "sell",
+                    "ord_dvsn": "00",
+                    "ord_qty": "1",
+                    "ord_unpr": "70000",
+                    "pdno": "005930",
+                },
+            )
+
+        self.assertTrue(client.calls[0]["url"].startswith(server.VIRTUAL_DOMAIN))
+        self.assertEqual(client.calls[0]["headers"]["tr_id"], "VTTC0011U")
+
+    async def test_generic_post_infers_overseas_market_and_side_trid(self):
+        env = {
+            "KIS_APP_KEY": "app",
+            "KIS_APP_SECRET": "secret",
+            "KIS_ACCOUNT_TYPE": "REAL",
+            "KIS_CANO": "12345678",
+            "KIS_ACNT_PRDT_CD": "01",
+        }
+        client = StubClient(StubResponse({"rt_cd": "0"}))
+
+        with patch.dict(os.environ, env, clear=True), \
+             patch.object(server, "get_http_client", AsyncMock(return_value=client)), \
+             patch.object(server, "get_access_token", AsyncMock(return_value="token")), \
+             patch.object(server, "get_hashkey", AsyncMock(return_value="hash")):
+            await server.call_kis_api(
+                "overseas_stock",
+                "order",
+                {
+                    "ctac_tlno": "",
+                    "mgco_aptm_odno": "",
+                    "ord_dv": "sell",
+                    "ord_dvsn": "00",
+                    "ord_qty": "1",
+                    "ord_svr_dvsn_cd": "0",
+                    "ovrs_excg_cd": "NASD",
+                    "ovrs_ord_unpr": "190.5",
+                    "pdno": "AAPL",
+                },
+            )
+
+        self.assertEqual(client.calls[0]["headers"]["tr_id"], "TTTT1006U")
+        self.assertEqual(client.calls[0]["json"]["OVRS_EXCG_CD"], "NASD")
+
+    async def test_generic_post_infers_virtual_overseas_order_trid(self):
+        env = {
+            "KIS_APP_KEY": "app",
+            "KIS_APP_SECRET": "secret",
+            "KIS_ACCOUNT_TYPE": "VIRTUAL",
+            "KIS_CANO": "12345678",
+            "KIS_ACNT_PRDT_CD": "01",
+        }
+        client = StubClient(StubResponse({"rt_cd": "0"}))
+
+        with patch.dict(os.environ, env, clear=True), \
+             patch.object(server, "get_http_client", AsyncMock(return_value=client)), \
+             patch.object(server, "get_access_token", AsyncMock(return_value="token")), \
+             patch.object(server, "get_hashkey", AsyncMock(return_value="hash")):
+            await server.call_kis_api(
+                "overseas_stock",
+                "order",
+                {
+                    "ctac_tlno": "",
+                    "mgco_aptm_odno": "",
+                    "ord_dv": "buy",
+                    "ord_dvsn": "00",
+                    "ord_qty": "1",
+                    "ord_svr_dvsn_cd": "0",
+                    "ovrs_excg_cd": "SEHK",
+                    "ovrs_ord_unpr": "50",
+                    "pdno": "00700",
+                },
+            )
+
+        self.assertTrue(client.calls[0]["url"].startswith(server.VIRTUAL_DOMAIN))
+        self.assertEqual(client.calls[0]["headers"]["tr_id"], "VTTS1002U")
 
     async def test_balance_request_uses_configured_account_product_code(self):
         env = {
