@@ -52,15 +52,26 @@ KIS_ENABLE_TRADING=true
 
 ## 설치
 
-상세한 LLM/MCP 클라이언트별 설치 가이드는 [`INSTALL.md`](INSTALL.md)를 참고하세요.
+설치는 [`INSTALL.md`](INSTALL.md)를 기준으로 진행하세요. LLM이나 MCP 클라이언트가 설정할 때도 이 파일을 우선 읽으면 됩니다.
+
+`INSTALL.md`에는 다음 내용이 포함되어 있습니다.
+
+- `uv` 기반 의존성 설치
+- `.env` 생성과 `KIS_APP_KEY`, `KIS_APP_SECRET`, `KIS_CANO`, `KIS_ACNT_PRDT_CD` 설정
+- Codex CLI, Claude Code, Claude Desktop, 일반 MCP 클라이언트 등록 예시
+- 컨텍스트 절약용 `KIS_MCP_TOOLSET=catalog` 설정
+- 잔고, 매수가능금액, 현재가 조회용 `call-kis-api` 예시
+
+빠른 로컬 준비:
 
 ```bash
 pip install uv
 uv sync
 cp .env.example .env
+chmod 600 .env
 ```
 
-`.env`에 아래 값을 설정합니다.
+그 다음 `.env`에 아래 값을 설정합니다. 자세한 값 설명과 클라이언트별 등록 명령은 [`INSTALL.md`](INSTALL.md)를 참고하세요.
 
 ```bash
 KIS_APP_KEY="발급받은 앱키"
@@ -68,6 +79,7 @@ KIS_APP_SECRET="발급받은 시크릿키"
 KIS_ACCOUNT_TYPE="REAL"   # REAL 또는 VIRTUAL
 KIS_CANO="계좌번호 앞 8자리"
 KIS_ACNT_PRDT_CD="01"
+KIS_MCP_TOOLSET="catalog"
 ```
 
 ## 실행
@@ -98,13 +110,19 @@ MCP_TYPE=sse MCP_HOST=127.0.0.1 MCP_PORT=8000 MCP_PATH=/sse uv run python server
 
 MCP 클라이언트 등록 예시:
 
+아래는 일반 MCP 클라이언트용 최소 예시입니다. Codex CLI, Claude Code, Claude Desktop 명령은 [`INSTALL.md`](INSTALL.md)를 사용하세요.
+
 ```json
 {
   "mcpServers": {
     "kis-mcp-server": {
       "command": "uv",
       "args": ["run", "python", "server.py"],
-      "cwd": "<project-root>"
+      "cwd": "<project-root>",
+      "env": {
+        "KIS_MCP_TOOLSET": "catalog",
+        "KIS_MCP_LOG_LEVEL": "WARNING"
+      }
     }
   }
 }
