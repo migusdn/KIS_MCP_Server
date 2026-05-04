@@ -154,6 +154,21 @@ MCP 클라이언트 등록 예시:
 
 주문 도구도 `KIS_ENABLE_TRADING=true`가 없으면 실행되지 않습니다.
 
+### 도구 로드 최적화
+
+MCP 클라이언트는 서버 연결 시 도구 이름, 설명, 입력 스키마를 컨텍스트에 올립니다. 도구 컨텍스트를 줄이고 싶으면 카탈로그 도구 3개만 노출할 수 있습니다.
+
+```bash
+KIS_MCP_TOOLSET=catalog uv run python server.py
+```
+
+| 값 | 노출 도구 | 용도 |
+|---|---|---|
+| `full` | 카탈로그 도구 + 편의 도구 전체 | 기존 동작과 호환 |
+| `catalog` | `list-kis-api-specs`, `get-kis-api-spec`, `call-kis-api` | 낮은 컨텍스트 사용량 |
+
+`catalog` 모드에서도 166개 API는 `call-kis-api`로 모두 호출할 수 있습니다. 필요한 상세 파라미터는 `get-kis-api-spec`로 그때그때 조회합니다.
+
 ## `call-kis-api` 예시
 
 국내주식 현재가:
@@ -237,6 +252,7 @@ MCP 클라이언트 등록 예시:
 | `KIS_ACNT_PRDT_CD` | 계좌상품코드 | `01` |
 | `KIS_TOKEN_FILE` | 토큰 캐시 파일 | `token.json` |
 | `KIS_ENABLE_TRADING` | 주문/정정/취소 API 활성화 | 비활성 |
+| `KIS_MCP_TOOLSET` | MCP 도구 노출 범위 (`full`, `catalog`) | `full` |
 | `KIS_MCP_LOG_LEVEL` | 로그 레벨 | `INFO` |
 | `MCP_TYPE` | `stdio`, `sse`, `streamable-http` | `stdio` |
 | `MCP_HOST` | HTTP/SSE host | `127.0.0.1` |

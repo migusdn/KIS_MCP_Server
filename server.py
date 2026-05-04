@@ -31,6 +31,31 @@ logger = logging.getLogger("mcp-server")
 
 # MCP 클라이언트별 실행 환경을 명시적으로 다룬다.
 SUPPORTED_TRANSPORTS = {"stdio", "sse", "streamable-http"}
+SUPPORTED_TOOLSETS = {"full", "catalog"}
+CATALOG_TOOL_NAMES = frozenset(
+    {
+        "list-kis-api-specs",
+        "get-kis-api-spec",
+        "call-kis-api",
+    }
+)
+ALL_TOOL_NAMES = frozenset(
+    {
+        *CATALOG_TOOL_NAMES,
+        "inquery-stock-price",
+        "inquery-balance",
+        "order-stock",
+        "inquery-order-list",
+        "inquery-order-detail",
+        "inquery-stock-info",
+        "inquery-stock-history",
+        "inquery-stock-ask",
+        "inquery-stock-market",
+        "inquery-stock-basic-info",
+        "order-overseas-stock",
+        "inquery-overseas-stock-price",
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -41,6 +66,7 @@ class RuntimeConfig:
     host: str = "127.0.0.1"
     port: int = 8000
     path: str = "/mcp"
+    toolset: str = "full"
 
 
 # Create MCP instance
@@ -72,6 +98,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--host", help="HTTP/SSE transport host (기본값: MCP_HOST 또는 127.0.0.1)")
     parser.add_argument("--port", type=int, help="HTTP/SSE transport port (기본값: MCP_PORT 또는 8000)")
     parser.add_argument("--path", help="HTTP/SSE transport path (기본값: MCP_PATH 또는 /mcp)")
+    parser.add_argument(
+        "--toolset",
+        choices=sorted(SUPPORTED_TOOLSETS),
+        help="노출할 MCP 도구셋 (full 또는 catalog, 기본값: KIS_MCP_TOOLSET 또는 full)",
+    )
     return parser
 
 
@@ -104,12 +135,18 @@ def get_runtime_config(args: argparse.Namespace) -> RuntimeConfig:
         logger.warning("지원하지 않는 MCP_TYPE=%s, stdio로 대체합니다.", transport)
         transport = "stdio"
 
+    toolset = (args.toolset or os.getenv("KIS_MCP_TOOLSET", "full")).lower()
+    if toolset not in SUPPORTED_TOOLSETS:
+        logger.warning("지원하지 않는 KIS_MCP_TOOLSET=%s, full로 대체합니다.", toolset)
+        toolset = "full"
+
     port_value = args.port or int(os.getenv("MCP_PORT", "8000") or "8000")
     return RuntimeConfig(
         transport=transport,
         host=args.host or os.getenv("MCP_HOST", "127.0.0.1"),
         port=port_value,
         path=args.path or os.getenv("MCP_PATH", "/mcp"),
+        toolset=toolset,
     )
 
 
@@ -121,8 +158,24 @@ def configure_runtime(argv: list[str] | None = None) -> RuntimeConfig:
     return get_runtime_config(args)
 
 
+def _disabled_tool_names(toolset: str) -> set[str]:
+    if toolset == "full":
+        return set()
+    if toolset == "catalog":
+        return set(ALL_TOOL_NAMES - CATALOG_TOOL_NAMES)
+    raise ValueError(f"Unknown toolset: {toolset}")
+
+
+def apply_toolset(toolset: str) -> None:
+    """Hide non-selected MCP tools before serving the tool list."""
+
+    for tool_name in sorted(_disabled_tool_names(toolset)):
+        mcp.local_provider.remove_tool(tool_name)
+
+
 def run_mcp_server(config: RuntimeConfig) -> None:
-    logger.info("Starting KIS MCP server with transport=%s", config.transport)
+    apply_toolset(config.toolset)
+    logger.info("Starting KIS MCP server with transport=%s toolset=%s", config.transport, config.toolset)
     if config.transport == "stdio":
         mcp.run(transport="stdio")
         return

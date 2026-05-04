@@ -46,6 +46,7 @@ class RuntimeConfigTests(unittest.TestCase):
                 "--host", "0.0.0.0",
                 "--port", "9000",
                 "--path", "/kis",
+                "--toolset", "catalog",
                 "--app-key", "app",
                 "--app-secret", "secret",
                 "--account-type", "virtual",
@@ -57,8 +58,23 @@ class RuntimeConfigTests(unittest.TestCase):
             self.assertEqual(cfg.host, "0.0.0.0")
             self.assertEqual(cfg.port, 9000)
             self.assertEqual(cfg.path, "/kis")
+            self.assertEqual(cfg.toolset, "catalog")
             self.assertEqual(os.environ["KIS_ACCOUNT_TYPE"], "VIRTUAL")
             self.assertEqual(server.get_account_product_code(), "22")
+
+    def test_catalog_toolset_disables_convenience_tools(self):
+        disabled = server._disabled_tool_names("catalog")
+
+        self.assertIn("inquery-balance", disabled)
+        self.assertIn("order-overseas-stock", disabled)
+        self.assertNotIn("call-kis-api", disabled)
+        self.assertEqual(server._disabled_tool_names("full"), set())
+
+    def test_toolset_can_be_configured_from_environment(self):
+        with patch.dict(os.environ, {"KIS_MCP_TOOLSET": "catalog"}, clear=True):
+            cfg = server.configure_runtime([])
+
+        self.assertEqual(cfg.toolset, "catalog")
 
     def test_validation_reports_missing_credentials(self):
         with patch.dict(os.environ, {}, clear=True):
