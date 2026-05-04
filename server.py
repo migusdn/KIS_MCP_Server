@@ -5,6 +5,8 @@ import logging
 import os
 from pathlib import Path
 import sys
+from functools import lru_cache
+from typing import Any
 from dotenv import load_dotenv
 from datetime import datetime, timedelta
 
@@ -22,7 +24,7 @@ logging.basicConfig(
 
 logger = logging.getLogger("mcp-server")
 
-# 공식 KIS Trading MCP처럼 실행 환경을 명시적으로 다룬다.
+# MCP 클라이언트별 실행 환경을 명시적으로 다룬다.
 SUPPORTED_TRANSPORTS = {"stdio", "sse", "streamable-http"}
 
 
@@ -288,6 +290,7 @@ class TrIdManager:
 # Token storage
 TOKEN_FILE = Path(os.getenv("KIS_TOKEN_FILE", "token.json"))
 DEFAULT_ACNT_PRDT_CD = "01"
+API_SPEC_FILE = Path(__file__).resolve().parent / "data" / "kis_api_specs.json"
 
 _http_client: httpx.AsyncClient | None = None
 _token_cache = {
@@ -395,6 +398,229 @@ def response_json(response: httpx.Response, error_message: str) -> dict:
         raise Exception(f"{error_message}: invalid JSON response") from exc
 
 
+@lru_cache(maxsize=1)
+def load_kis_api_catalog() -> dict[str, Any]:
+    """Load KIS API interface metadata collected for this MCP server."""
+
+    with open(API_SPEC_FILE, encoding="utf-8") as f:
+        return json.load(f)
+
+
+def iter_kis_api_specs() -> list[dict[str, Any]]:
+    catalog = load_kis_api_catalog()
+    specs: list[dict[str, Any]] = []
+    for group, group_data in catalog["groups"].items():
+        for api_type, spec in group_data["apis"].items():
+            specs.append({**spec, "group": group, "api_type": api_type})
+    return specs
+
+
+def get_kis_api_spec_record(group: str, api_type: str) -> dict[str, Any]:
+    catalog = load_kis_api_catalog()
+    try:
+        return catalog["groups"][group]["apis"][api_type]
+    except KeyError as exc:
+        raise ValueError(f"Unknown KIS API spec: {group}.{api_type}") from exc
+
+
+def _env_is_virtual(env_dv: str | None = None) -> bool:
+    if env_dv:
+        return env_dv.lower() in {"demo", "virtual", "vps", "paper"}
+    return os.getenv("KIS_ACCOUNT_TYPE", "REAL").upper() == "VIRTUAL"
+
+
+def _select_api_domain(spec: dict[str, Any], tr_id: str | None, env_dv: str | None, domain: str | None) -> str:
+    if domain:
+        if not domain.startswith("https://"):
+            raise ValueError("domain override must start with https://")
+        return domain.rstrip("/")
+
+    path = spec["path"]
+    if spec["group"] == "auth":
+        return VIRTUAL_DOMAIN if _env_is_virtual(env_dv) else DOMAIN
+
+    if _env_is_virtual(env_dv) and (tr_id or "").startswith("V"):
+        return VIRTUAL_DOMAIN
+    if _env_is_virtual(env_dv) and "/trading/" in path:
+        return VIRTUAL_DOMAIN
+    return DOMAIN
+
+
+def _select_tr_id(spec: dict[str, Any], tr_id: str | None = None, env_dv: str | None = None) -> str | None:
+    if tr_id:
+        return tr_id
+
+    candidates = spec.get("tr_ids", [])
+    if not candidates:
+        return None
+    if len(candidates) == 1:
+        return candidates[0]
+
+    want_virtual = _env_is_virtual(env_dv)
+    filtered = [candidate for candidate in candidates if candidate.startswith("V") == want_virtual]
+    if len(filtered) == 1:
+        return filtered[0]
+
+    raise ValueError(
+        f"{spec['group']}.{spec['api_type']} has multiple TR_ID candidates. "
+        f"Pass tr_id explicitly. candidates={', '.join(candidates)}"
+    )
+
+
+def _lookup_input_value(input_params: dict[str, Any], name: str, wire_name: str) -> tuple[bool, Any]:
+    lookup_keys = {
+        name,
+        name.lower(),
+        name.upper(),
+        wire_name,
+        wire_name.lower(),
+        wire_name.upper(),
+    }
+    for key in lookup_keys:
+        if key in input_params:
+            return True, input_params[key]
+    return False, None
+
+
+def _default_param_value(name: str, wire_name: str) -> tuple[bool, Any]:
+    if wire_name == "CANO":
+        return True, get_account_number()
+    if wire_name == "ACNT_PRDT_CD":
+        return True, get_account_product_code()
+    if name == "grant_type":
+        return True, "client_credentials"
+    if name == "appkey":
+        value = os.getenv("KIS_APP_KEY")
+        return (value is not None), value
+    if name == "appsecret":
+        value = os.getenv("KIS_APP_SECRET")
+        return (value is not None), value
+    return False, None
+
+
+def _prepare_api_payload(spec: dict[str, Any], params: dict[str, Any] | None) -> dict[str, Any]:
+    input_params = params or {}
+    if not isinstance(input_params, dict):
+        raise ValueError("params must be an object/dict")
+
+    payload: dict[str, Any] = {}
+    consumed: set[str] = set()
+    missing: list[str] = []
+    known_wire_names = {param["wire_name"] for param in spec.get("params", [])}
+
+    for param in spec.get("params", []):
+        name = param["name"]
+        wire_name = param["wire_name"]
+        found, value = _lookup_input_value(input_params, name, wire_name)
+        if found:
+            consumed.update({name, name.lower(), name.upper(), wire_name, wire_name.lower(), wire_name.upper()})
+        else:
+            found, value = _default_param_value(name, wire_name)
+        if not found and param.get("default") is not None:
+            found, value = True, param["default"]
+        if not found:
+            if param.get("required"):
+                missing.append(name)
+            continue
+        payload[wire_name] = value
+
+    for key, value in input_params.items():
+        if key in consumed:
+            continue
+        wire_key = key if key in known_wire_names or key.upper() in known_wire_names else key.upper()
+        if wire_key.upper() in known_wire_names:
+            wire_key = wire_key.upper()
+        payload[wire_key] = value
+
+    if missing:
+        raise ValueError(f"Missing required params for {spec['group']}.{spec['api_type']}: {', '.join(missing)}")
+
+    return payload
+
+
+@mcp.tool(
+    name="list-kis-api-specs",
+    description="List collected KIS REST API specs available through the generic KIS API caller",
+)
+async def list_kis_api_specs(group: str | None = None, query: str | None = None, limit: int = 50):
+    catalog = load_kis_api_catalog()
+    query_text = (query or "").lower()
+    items: list[dict[str, Any]] = []
+
+    for spec in iter_kis_api_specs():
+        if group and spec["group"] != group:
+            continue
+        searchable = " ".join(
+            str(spec.get(key, "")) for key in ["group", "api_type", "category", "name", "path"]
+        ).lower()
+        if query_text and query_text not in searchable:
+            continue
+        items.append(
+            {
+                "group": spec["group"],
+                "api_type": spec["api_type"],
+                "category": spec.get("category", ""),
+                "name": spec.get("name", ""),
+                "path": spec["path"],
+                "http_method": spec["http_method"],
+                "tr_ids": spec.get("tr_ids", []),
+                "required_params": [p["name"] for p in spec.get("params", []) if p.get("required")],
+            }
+        )
+
+    return {
+        "total_apis": catalog["total_apis"],
+        "matched": len(items),
+        "items": items[: max(1, min(limit, 200))],
+    }
+
+
+@mcp.tool(
+    name="get-kis-api-spec",
+    description="Get one KIS REST API spec with endpoint, TR_ID candidates, and request parameters",
+)
+async def get_kis_api_spec(group: str, api_type: str):
+    return get_kis_api_spec_record(group, api_type)
+
+
+@mcp.tool(
+    name="call-kis-api",
+    description="Call any collected KIS REST API by group/api_type using cataloged interface metadata",
+)
+async def call_kis_api(
+    group: str,
+    api_type: str,
+    params: dict[str, Any] | None = None,
+    tr_id: str | None = None,
+    tr_cont: str = "",
+    env_dv: str | None = None,
+    domain: str | None = None,
+    auto_hashkey: bool = True,
+):
+    spec = get_kis_api_spec_record(group, api_type)
+    payload = _prepare_api_payload(spec, params)
+    selected_tr_id = _select_tr_id(spec, tr_id=tr_id, env_dv=env_dv)
+    base_url = _select_api_domain(spec, selected_tr_id, env_dv, domain)
+    url = f"{base_url}{spec['path']}"
+
+    async with kis_client() as client:
+        if group == "auth":
+            headers = {"content-type": CONTENT_TYPE}
+        else:
+            token = await get_access_token(client)
+            headers = kis_headers(token, selected_tr_id)
+            headers["custtype"] = "P"
+            headers["tr_cont"] = tr_cont
+            if spec["http_method"] == "POST" and auto_hashkey:
+                headers["hashkey"] = await get_hashkey(client, token, payload, domain=base_url)
+
+        if spec["http_method"] == "POST":
+            response = await client.post(url, headers=headers, json=payload)
+        else:
+            response = await client.get(url, headers=headers, params=payload)
+        return response_json(response, f"Failed to call KIS API {group}.{api_type}")
+
+
 def load_token():
     """Load token from file if it exists and is not expired"""
     token_file = get_token_file()
@@ -471,7 +697,7 @@ async def get_access_token(client: httpx.AsyncClient) -> str:
     
     return token
 
-async def get_hashkey(client: httpx.AsyncClient, token: str, body: dict) -> str:
+async def get_hashkey(client: httpx.AsyncClient, token: str, body: dict, domain: str | None = None) -> str:
     """
     Get hash key for order request
     
@@ -484,7 +710,7 @@ async def get_hashkey(client: httpx.AsyncClient, token: str, body: dict) -> str:
         str: Hash key
     """
     response = await client.post(
-        f"{TrIdManager.get_domain('buy')}{HASHKEY_PATH}",
+        f"{(domain or TrIdManager.get_domain('buy')).rstrip('/')}{HASHKEY_PATH}",
         headers=kis_headers(token, tr_id=""),
         json=body
     )

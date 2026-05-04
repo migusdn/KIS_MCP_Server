@@ -21,16 +21,21 @@ class StubResponse:
 
 class StubClient:
     def __init__(self, response):
-        self.response = response
+        self.responses = list(response) if isinstance(response, list) else [response]
         self.calls = []
+
+    def _next_response(self):
+        if len(self.responses) > 1:
+            return self.responses.pop(0)
+        return self.responses[0]
 
     async def get(self, url, headers=None, params=None):
         self.calls.append({"method": "GET", "url": url, "headers": headers, "params": params})
-        return self.response
+        return self._next_response()
 
     async def post(self, url, headers=None, json=None, timeout=None):
         self.calls.append({"method": "POST", "url": url, "headers": headers, "json": json, "timeout": timeout})
-        return self.response
+        return self._next_response()
 
 
 class RuntimeConfigTests(unittest.TestCase):
@@ -73,6 +78,139 @@ class RuntimeConfigTests(unittest.TestCase):
 
 
 class KisRequestTests(unittest.IsolatedAsyncioTestCase):
+    def test_api_catalog_loads_all_collected_specs(self):
+        catalog = server.load_kis_api_catalog()
+
+        self.assertEqual(catalog["total_apis"], 166)
+        self.assertEqual(catalog["groups"]["domestic_stock"]["count"], 74)
+        self.assertEqual(catalog["groups"]["overseas_stock"]["count"], 34)
+        self.assertIn("sample implementation code", catalog["source"]["excluded"])
+
+    async def test_get_api_spec_returns_interface_metadata_only(self):
+        spec = await server.get_kis_api_spec("domestic_stock", "inquire_price")
+
+        self.assertEqual(spec["path"], "/uapi/domestic-stock/v1/quotations/inquire-price")
+        self.assertEqual(spec["tr_ids"], ["FHKST01010100"])
+        self.assertEqual(
+            [param["wire_name"] for param in spec["params"]],
+            ["FID_COND_MRKT_DIV_CODE", "FID_INPUT_ISCD"],
+        )
+        self.assertNotIn("description", json.dumps(spec, ensure_ascii=False).lower())
+
+    async def test_generic_call_maps_lowercase_params_to_wire_keys(self):
+        env = {
+            "KIS_APP_KEY": "app",
+            "KIS_APP_SECRET": "secret",
+            "KIS_ACCOUNT_TYPE": "REAL",
+        }
+        client = StubClient(StubResponse({"output": {"stck_prpr": "70000"}}))
+
+        with patch.dict(os.environ, env, clear=True), \
+             patch.object(server, "get_http_client", AsyncMock(return_value=client)), \
+             patch.object(server, "get_access_token", AsyncMock(return_value="token")):
+            result = await server.call_kis_api(
+                "domestic_stock",
+                "inquire_price",
+                {
+                    "fid_cond_mrkt_div_code": "J",
+                    "fid_input_iscd": "005930",
+                },
+            )
+
+        self.assertEqual(result["output"]["stck_prpr"], "70000")
+        self.assertEqual(client.calls[0]["method"], "GET")
+        self.assertTrue(client.calls[0]["url"].endswith("/uapi/domestic-stock/v1/quotations/inquire-price"))
+        self.assertEqual(client.calls[0]["headers"]["tr_id"], "FHKST01010100")
+        self.assertEqual(client.calls[0]["params"]["FID_COND_MRKT_DIV_CODE"], "J")
+        self.assertEqual(client.calls[0]["params"]["FID_INPUT_ISCD"], "005930")
+
+    async def test_generic_call_fills_account_and_selects_virtual_trid(self):
+        env = {
+            "KIS_APP_KEY": "app",
+            "KIS_APP_SECRET": "secret",
+            "KIS_ACCOUNT_TYPE": "VIRTUAL",
+            "KIS_CANO": "12345678",
+            "KIS_ACNT_PRDT_CD": "22",
+        }
+        client = StubClient(StubResponse({"ok": True}))
+
+        with patch.dict(os.environ, env, clear=True), \
+             patch.object(server, "get_http_client", AsyncMock(return_value=client)), \
+             patch.object(server, "get_access_token", AsyncMock(return_value="token")):
+            result = await server.call_kis_api(
+                "domestic_stock",
+                "inquire_balance",
+                {
+                    "afhr_flpr_yn": "N",
+                    "fncg_amt_auto_rdpt_yn": "N",
+                    "fund_sttl_icld_yn": "N",
+                    "inqr_dvsn": "01",
+                    "prcs_dvsn": "00",
+                    "unpr_dvsn": "01",
+                },
+            )
+
+        self.assertEqual(result, {"ok": True})
+        self.assertTrue(client.calls[0]["url"].startswith(server.VIRTUAL_DOMAIN))
+        self.assertEqual(client.calls[0]["headers"]["tr_id"], "VTTC8434R")
+        self.assertEqual(client.calls[0]["params"]["CANO"], "12345678")
+        self.assertEqual(client.calls[0]["params"]["ACNT_PRDT_CD"], "22")
+
+    async def test_generic_post_requires_explicit_trid_when_ambiguous(self):
+        with patch.dict(
+            os.environ,
+            {"KIS_ACCOUNT_TYPE": "REAL", "KIS_CANO": "12345678", "KIS_ACNT_PRDT_CD": "01"},
+            clear=True,
+        ):
+            with self.assertRaisesRegex(ValueError, "Pass tr_id explicitly"):
+                await server.call_kis_api(
+                    "domestic_stock",
+                    "order_cash",
+                    {
+                        "excg_id_dvsn_cd": "KRX",
+                        "ord_dv": "buy",
+                        "ord_dvsn": "00",
+                        "ord_qty": "1",
+                        "ord_unpr": "70000",
+                        "pdno": "005930",
+                    },
+                )
+
+    async def test_generic_post_uses_hashkey_and_json_body(self):
+        env = {
+            "KIS_APP_KEY": "app",
+            "KIS_APP_SECRET": "secret",
+            "KIS_ACCOUNT_TYPE": "REAL",
+            "KIS_CANO": "12345678",
+            "KIS_ACNT_PRDT_CD": "01",
+        }
+        client = StubClient(StubResponse({"rt_cd": "0"}))
+
+        with patch.dict(os.environ, env, clear=True), \
+             patch.object(server, "get_http_client", AsyncMock(return_value=client)), \
+             patch.object(server, "get_access_token", AsyncMock(return_value="token")), \
+             patch.object(server, "get_hashkey", AsyncMock(return_value="hash")):
+            result = await server.call_kis_api(
+                "domestic_stock",
+                "order_cash",
+                {
+                    "excg_id_dvsn_cd": "KRX",
+                    "ord_dv": "buy",
+                    "ord_dvsn": "00",
+                    "ord_qty": "1",
+                    "ord_unpr": "70000",
+                    "pdno": "005930",
+                },
+                tr_id="TTTC0012U",
+            )
+
+        self.assertEqual(result, {"rt_cd": "0"})
+        self.assertEqual(client.calls[0]["method"], "POST")
+        self.assertEqual(client.calls[0]["headers"]["tr_id"], "TTTC0012U")
+        self.assertEqual(client.calls[0]["headers"]["hashkey"], "hash")
+        self.assertEqual(client.calls[0]["json"]["CANO"], "12345678")
+        self.assertEqual(client.calls[0]["json"]["PDNO"], "005930")
+
     async def test_balance_request_uses_configured_account_product_code(self):
         env = {
             "KIS_APP_KEY": "app",
@@ -93,7 +231,7 @@ class KisRequestTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(client.calls[0]["params"]["ACNT_PRDT_CD"], "22")
         self.assertEqual(client.calls[0]["headers"]["tr_id"], "VTTC8434R")
 
-    async def test_stock_market_uses_official_index_endpoint(self):
+    async def test_stock_market_uses_catalog_index_endpoint(self):
         env = {
             "KIS_APP_KEY": "app",
             "KIS_APP_SECRET": "secret",
@@ -112,7 +250,7 @@ class KisRequestTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(client.calls[0]["params"]["FID_INPUT_ISCD"], "0001")
         self.assertEqual(client.calls[0]["headers"]["tr_id"], "FHPUP02100000")
 
-    async def test_stock_basic_info_uses_official_search_endpoint(self):
+    async def test_stock_basic_info_uses_catalog_search_endpoint(self):
         env = {
             "KIS_APP_KEY": "app",
             "KIS_APP_SECRET": "secret",
