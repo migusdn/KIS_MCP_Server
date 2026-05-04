@@ -1,7 +1,7 @@
 import asyncio
 import json
 from datetime import datetime, timedelta
-from main import (
+from server import (
     inquery_stock_price,
     inquery_balance,
     order_stock,
