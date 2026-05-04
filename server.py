@@ -13,9 +13,14 @@ from datetime import datetime, timedelta
 import httpx
 from fastmcp import FastMCP
 
+def _log_level() -> int:
+    level_name = os.getenv("KIS_MCP_LOG_LEVEL", "INFO").upper()
+    return getattr(logging, level_name, logging.INFO)
+
+
 # 로깅 설정: 반드시 stderr로 출력
 logging.basicConfig(
-    level=logging.DEBUG,
+    level=_log_level(),
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
         logging.StreamHandler(sys.stderr)
@@ -171,6 +176,8 @@ OVERSEAS_ORDER_LIST_PATH = "/uapi/overseas-stock/v1/trading/inquire-daily-ccld"
 # Headers and other constants
 CONTENT_TYPE = "application/json"
 AUTH_TYPE = "Bearer"
+TRADING_ENABLED_ENV = "KIS_ENABLE_TRADING"
+TRUTHY_VALUES = {"1", "true", "yes", "y", "on"}
 
 # Market codes for overseas stock
 MARKET_CODES = {
@@ -183,6 +190,27 @@ MARKET_CODES = {
     "TKSE": "일본",
     "HASE": "베트남 하노이",
     "VNSE": "베트남 호치민"
+}
+
+OVERSEAS_QUOTE_EXCHANGE_CODES = {
+    "NASD": "NAS",
+    "NYSE": "NYS",
+    "AMEX": "AMS",
+    "SEHK": "HKS",
+    "SHAA": "SHS",
+    "SZAA": "SZS",
+    "TKSE": "TSE",
+    "HASE": "HNX",
+    "VNSE": "HSX",
+    "NAS": "NAS",
+    "NYS": "NYS",
+    "AMS": "AMS",
+    "HKS": "HKS",
+    "SHS": "SHS",
+    "SZS": "SZS",
+    "TSE": "TSE",
+    "HNX": "HNX",
+    "HSX": "HSX",
 }
 
 class TrIdManager:
@@ -235,7 +263,7 @@ class TrIdManager:
         
         # 해외주식
         "us_buy": "VTTT1002U",      # 미국 매수 주문
-        "us_sell": "VTTT1001U",     # 미국 매도 주문
+        "us_sell": "VTTT1006U",     # 미국 매도 주문
         "jp_buy": "VTTS0308U",      # 일본 매수 주문
         "jp_sell": "VTTS0307U",     # 일본 매도 주문
         "sh_buy": "VTTS0202U",      # 상해 매수 주문
@@ -297,6 +325,7 @@ _token_cache = {
     "token": None,
     "expires_at": None,
     "app_key": None,
+    "token_scope": None,
 }
 
 
@@ -429,12 +458,7 @@ def _env_is_virtual(env_dv: str | None = None) -> bool:
     return os.getenv("KIS_ACCOUNT_TYPE", "REAL").upper() == "VIRTUAL"
 
 
-def _select_api_domain(spec: dict[str, Any], tr_id: str | None, env_dv: str | None, domain: str | None) -> str:
-    if domain:
-        if not domain.startswith("https://"):
-            raise ValueError("domain override must start with https://")
-        return domain.rstrip("/")
-
+def _select_api_domain(spec: dict[str, Any], tr_id: str | None, env_dv: str | None) -> str:
     path = spec["path"]
     if spec["group"] == "auth":
         return VIRTUAL_DOMAIN if _env_is_virtual(env_dv) else DOMAIN
@@ -467,6 +491,25 @@ def _virtualize_tr_id(tr_id: str, env_dv: str | None = None) -> str:
     if _env_is_virtual(env_dv) and tr_id and tr_id[0] in {"T", "J", "C"}:
         return "V" + tr_id[1:]
     return tr_id
+
+
+def _env_flag_enabled(name: str) -> bool:
+    return os.getenv(name, "").strip().lower() in TRUTHY_VALUES
+
+
+def _is_state_changing_trading_api(spec: dict[str, Any]) -> bool:
+    return spec.get("http_method") == "POST" and "/trading/" in spec.get("path", "")
+
+
+def _ensure_trading_enabled(spec: dict[str, Any]) -> None:
+    if not _is_state_changing_trading_api(spec):
+        return
+    if _env_flag_enabled(TRADING_ENABLED_ENV):
+        return
+    raise PermissionError(
+        f"{spec['group']}.{spec['api_type']} is a state-changing trading API. "
+        f"Set {TRADING_ENABLED_ENV}=true to enable order/modify/cancel calls."
+    )
 
 
 def _infer_tr_id_from_payload(spec: dict[str, Any], payload: dict[str, Any], env_dv: str | None) -> str | None:
@@ -671,7 +714,11 @@ def _default_param_value(name: str, wire_name: str) -> tuple[bool, Any]:
     return False, None
 
 
-def _prepare_api_payload(spec: dict[str, Any], params: dict[str, Any] | None) -> dict[str, Any]:
+def _prepare_api_payload(
+    spec: dict[str, Any],
+    params: dict[str, Any] | None,
+    allow_extra_params: bool = False,
+) -> dict[str, Any]:
     input_params = params or {}
     if not isinstance(input_params, dict):
         raise ValueError("params must be an object/dict")
@@ -697,16 +744,22 @@ def _prepare_api_payload(spec: dict[str, Any], params: dict[str, Any] | None) ->
             continue
         payload[wire_name] = value
 
+    unknown: list[str] = []
     for key, value in input_params.items():
         if key in consumed:
             continue
         wire_key = key if key in known_wire_names or key.upper() in known_wire_names else key.upper()
         if wire_key.upper() in known_wire_names:
             wire_key = wire_key.upper()
+        elif not allow_extra_params:
+            unknown.append(key)
+            continue
         payload[wire_key] = value
 
     if missing:
         raise ValueError(f"Missing required params for {spec['group']}.{spec['api_type']}: {', '.join(missing)}")
+    if unknown:
+        raise ValueError(f"Unknown params for {spec['group']}.{spec['api_type']}: {', '.join(sorted(unknown))}")
 
     return payload
 
@@ -767,20 +820,21 @@ async def call_kis_api(
     tr_id: str | None = None,
     tr_cont: str = "",
     env_dv: str | None = None,
-    domain: str | None = None,
     auto_hashkey: bool = True,
+    allow_extra_params: bool = False,
 ):
     spec = get_kis_api_spec_record(group, api_type)
-    payload = _prepare_api_payload(spec, params)
+    payload = _prepare_api_payload(spec, params, allow_extra_params=allow_extra_params)
     selected_tr_id = _select_tr_id(spec, tr_id=tr_id, env_dv=env_dv, payload=payload)
-    base_url = _select_api_domain(spec, selected_tr_id, env_dv, domain)
+    _ensure_trading_enabled(spec)
+    base_url = _select_api_domain(spec, selected_tr_id, env_dv)
     url = f"{base_url}{spec['path']}"
 
     async with kis_client() as client:
         if group == "auth":
             headers = {"content-type": CONTENT_TYPE}
         else:
-            token = await get_access_token(client)
+            token = await get_access_token(client, env_dv=env_dv)
             headers = kis_headers(token, selected_tr_id)
             headers["custtype"] = "P"
             headers["tr_cont"] = tr_cont
@@ -794,7 +848,11 @@ async def call_kis_api(
         return response_json(response, f"Failed to call KIS API {group}.{api_type}")
 
 
-def load_token():
+def _token_scope(env_dv: str | None = None) -> str:
+    return "virtual" if _env_is_virtual(env_dv) else "real"
+
+
+def load_token(env_dv: str | None = None):
     """Load token from file if it exists and is not expired"""
     token_file = get_token_file()
     if token_file.exists():
@@ -806,6 +864,9 @@ def load_token():
                 current_app_key = os.getenv("KIS_APP_KEY")
                 if cached_app_key and current_app_key and cached_app_key != current_app_key:
                     return None, None
+                cached_scope = token_data.get("token_scope")
+                if cached_scope != _token_scope(env_dv):
+                    return None, None
                 if datetime.now() < expires_at:
                     return token_data['token'], expires_at
         except Exception as e:
@@ -813,43 +874,54 @@ def load_token():
     return None, None
 
 
-def save_token(token: str, expires_at: datetime):
+def save_token(token: str, expires_at: datetime, env_dv: str | None = None):
     """Save token to file"""
     try:
         token_file = get_token_file()
-        with open(token_file, 'w') as f:
+        token_file.parent.mkdir(parents=True, exist_ok=True)
+        fd = os.open(token_file, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, 'w') as f:
             json.dump({
                 'token': token,
                 'expires_at': expires_at.isoformat(),
                 'app_key': os.getenv("KIS_APP_KEY"),
+                'token_scope': _token_scope(env_dv),
             }, f)
+        os.chmod(token_file, 0o600)
     except Exception as e:
         print(f"Error saving token: {e}", file=sys.stderr)
 
 
-async def get_access_token(client: httpx.AsyncClient) -> str:
+async def get_access_token(client: httpx.AsyncClient, env_dv: str | None = None) -> str:
     """
     Get access token with file-based caching
     Returns cached token if valid, otherwise requests new token
     """
     validate_kis_credentials(require_account=False)
     current_app_key = os.environ["KIS_APP_KEY"]
+    current_scope = _token_scope(env_dv)
 
     if (
         _token_cache["token"]
         and _token_cache["expires_at"]
         and _token_cache["app_key"] == current_app_key
+        and _token_cache["token_scope"] == current_scope
         and datetime.now() < _token_cache["expires_at"]
     ):
         return _token_cache["token"]
 
-    token, expires_at = load_token()
+    token, expires_at = load_token(env_dv=env_dv)
     if token and expires_at and datetime.now() < expires_at:
-        _token_cache.update({"token": token, "expires_at": expires_at, "app_key": current_app_key})
+        _token_cache.update({
+            "token": token,
+            "expires_at": expires_at,
+            "app_key": current_app_key,
+            "token_scope": current_scope,
+        })
         return token
     
     token_response = await client.post(
-        f"{DOMAIN}{TOKEN_PATH}",
+        f"{VIRTUAL_DOMAIN if _env_is_virtual(env_dv) else DOMAIN}{TOKEN_PATH}",
         headers={"content-type": CONTENT_TYPE},
         json={
             "grant_type": "client_credentials",
@@ -865,8 +937,13 @@ async def get_access_token(client: httpx.AsyncClient) -> str:
     token = token_data["access_token"]
     
     expires_at = datetime.now() + timedelta(hours=23)
-    save_token(token, expires_at)
-    _token_cache.update({"token": token, "expires_at": expires_at, "app_key": current_app_key})
+    save_token(token, expires_at, env_dv=env_dv)
+    _token_cache.update({
+        "token": token,
+        "expires_at": expires_at,
+        "app_key": current_app_key,
+        "token_scope": current_scope,
+    })
     
     return token
 
@@ -950,7 +1027,7 @@ async def inquery_balance():
     """
     async with kis_client() as client:
         token = await get_access_token(client)
-        logger.info(f"TrIdManager.get_tr_id('balance'): {TrIdManager.get_tr_id('balance')}")
+        logger.debug("balance tr_id=%s", TrIdManager.get_tr_id("balance"))
         # Prepare request data
         request_data = {
             "CANO": get_account_number(),  # 계좌번호
@@ -976,7 +1053,7 @@ async def inquery_balance():
     name="order-stock",
     description="Order stock (buy/sell) from Korea Investment & Securities",
 )
-async def order_stock(symbol: str, quantity: int, price: int, order_type: str):
+async def order_stock(symbol: str, quantity: int, price: int, order_type: str, exchange: str = "KRX"):
     """
     Order stock (buy/sell) from Korea Investment & Securities
     
@@ -994,28 +1071,18 @@ async def order_stock(symbol: str, quantity: int, price: int, order_type: str):
     if order_type not in ["buy", "sell"]:
         raise ValueError('order_type must be either "buy" or "sell"')
 
-    async with kis_client() as client:
-        token = await get_access_token(client)
-        
-        # Prepare request data
-        request_data = {
-            "CANO": get_account_number(),  # 계좌번호
-            "ACNT_PRDT_CD": get_account_product_code(),  # 계좌상품코드
-            "PDNO": symbol,  # 종목코드
-            "ORD_DVSN": "01" if price == 0 else "00",  # 주문구분 (01: 시장가, 00: 지정가)
-            "ORD_QTY": str(quantity),  # 주문수량
-            "ORD_UNPR": str(price),  # 주문단가
-        }
-        
-        # Get hashkey
-        hashkey = await get_hashkey(client, token, request_data)
-        
-        response = await client.post(
-            f"{TrIdManager.get_domain(order_type)}{ORDER_PATH}",
-            headers=kis_headers(token, TrIdManager.get_tr_id(order_type), hashkey=hashkey),
-            json=request_data
-        )
-        return response_json(response, "Failed to order stock")
+    return await call_kis_api(
+        "domestic_stock",
+        "order_cash",
+        {
+            "excg_id_dvsn_cd": exchange,
+            "ord_dv": order_type,
+            "ord_dvsn": "01" if price == 0 else "00",
+            "ord_qty": str(quantity),
+            "ord_unpr": str(price),
+            "pdno": symbol,
+        },
+    )
 
 @mcp.tool(
     name="inquery-order-list",
@@ -1276,7 +1343,17 @@ async def inquery_stock_basic_info(symbol: str, product_type: str = "300"):
     name="order-overseas-stock",
     description="Order overseas stock (buy/sell) from Korea Investment & Securities",
 )
-async def order_overseas_stock(symbol: str, quantity: int, price: float, order_type: str, market: str):
+async def order_overseas_stock(
+    symbol: str,
+    quantity: int,
+    price: float,
+    order_type: str,
+    market: str,
+    order_division: str | None = None,
+    contact_phone: str = "",
+    mgco_aptm_odno: str = "",
+    order_server_division: str = "0",
+):
     """
     Order overseas stock (buy/sell)
     
@@ -1300,49 +1377,21 @@ async def order_overseas_stock(symbol: str, quantity: int, price: float, order_t
     if market not in MARKET_CODES:
         raise ValueError(f"Unsupported market: {market}. Supported markets: {', '.join(MARKET_CODES.keys())}")
 
-    async with kis_client() as client:
-        token = await get_access_token(client)
-        
-        # Get market prefix for TR_ID
-        market_prefix = {
-            "NASD": "us",  # 나스닥
-            "NYSE": "us",  # 뉴욕
-            "AMEX": "us",  # 아멕스
-            "SEHK": "hk",  # 홍콩
-            "SHAA": "sh",  # 중국상해
-            "SZAA": "sz",  # 중국심천
-            "TKSE": "jp",  # 일본
-            "HASE": "vn",  # 베트남 하노이
-            "VNSE": "vn",  # 베트남 호치민
-        }.get(market)
-        
-        if not market_prefix:
-            raise ValueError(f"Unsupported market: {market}")
-            
-        tr_id_key = f"{market_prefix}_{order_type}"
-        tr_id = TrIdManager.get_tr_id(tr_id_key)
-        
-        if not tr_id:
-            raise ValueError(f"Invalid operation type: {tr_id_key}")
-        
-        # Prepare request data
-        request_data = {
-            "CANO": get_account_number(),           # 계좌번호
-            "ACNT_PRDT_CD": get_account_product_code(),                     # 계좌상품코드
-            "OVRS_EXCG_CD": market,                   # 해외거래소코드
-            "PDNO": symbol,                           # 종목코드
-            "ORD_QTY": str(quantity),                 # 주문수량
-            "OVRS_ORD_UNPR": str(price),             # 주문단가
-            "ORD_SVR_DVSN_CD": "0",                  # 주문서버구분코드
-            "ORD_DVSN": "00" if price > 0 else "01"  # 주문구분 (00: 지정가, 01: 시장가)
-        }
-        
-        response = await client.post(
-            f"{TrIdManager.get_domain(order_type)}{OVERSEAS_ORDER_PATH}",
-            headers=kis_headers(token, tr_id),
-            json=request_data
-        )
-        return response_json(response, "Failed to order overseas stock")
+    return await call_kis_api(
+        "overseas_stock",
+        "order",
+        {
+            "ctac_tlno": contact_phone,
+            "mgco_aptm_odno": mgco_aptm_odno,
+            "ord_dv": order_type,
+            "ord_dvsn": order_division or ("00" if price > 0 else "01"),
+            "ord_qty": str(quantity),
+            "ord_svr_dvsn_cd": order_server_division,
+            "ovrs_excg_cd": market,
+            "ovrs_ord_unpr": str(price),
+            "pdno": symbol,
+        },
+    )
 
 @mcp.tool(
     name="inquery-overseas-stock-price",
@@ -1359,15 +1408,16 @@ async def inquery_overseas_stock_price(symbol: str, market: str):
     Returns:
         Dictionary containing stock price information
     """
+    quote_exchange = OVERSEAS_QUOTE_EXCHANGE_CODES.get(market.upper(), market.upper())
     async with kis_client() as client:
         token = await get_access_token(client)
         
         response = await client.get(
-            f"{TrIdManager.get_domain('buy')}{OVERSEAS_STOCK_PRICE_PATH}",
+            f"{DOMAIN}{OVERSEAS_STOCK_PRICE_PATH}",
             headers=kis_headers(token, "HHDFS00000300"),
             params={
                 "AUTH": "",
-                "EXCD": market,
+                "EXCD": quote_exchange,
                 "SYMB": symbol
             }
         )

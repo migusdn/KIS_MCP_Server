@@ -76,6 +76,23 @@ class RuntimeConfigTests(unittest.TestCase):
             with patch.dict(os.environ, {"KIS_TOKEN_FILE": str(token_file), "KIS_APP_KEY": "new-app"}, clear=True):
                 self.assertEqual(server.load_token(), (None, None))
 
+    def test_token_cache_ignores_other_account_scope(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            token_file = Path(tmpdir) / "token.json"
+            token_file.write_text(json.dumps({
+                "token": "cached",
+                "expires_at": (datetime.now() + timedelta(hours=1)).isoformat(),
+                "app_key": "app",
+                "token_scope": "real",
+            }))
+            env = {
+                "KIS_TOKEN_FILE": str(token_file),
+                "KIS_APP_KEY": "app",
+                "KIS_ACCOUNT_TYPE": "VIRTUAL",
+            }
+            with patch.dict(os.environ, env, clear=True):
+                self.assertEqual(server.load_token(), (None, None))
+
 
 class KisRequestTests(unittest.IsolatedAsyncioTestCase):
     def test_api_catalog_loads_all_collected_specs(self):
@@ -123,6 +140,18 @@ class KisRequestTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(client.calls[0]["headers"]["tr_id"], "FHKST01010100")
         self.assertEqual(client.calls[0]["params"]["FID_COND_MRKT_DIV_CODE"], "J")
         self.assertEqual(client.calls[0]["params"]["FID_INPUT_ISCD"], "005930")
+
+    async def test_generic_call_rejects_unknown_params_by_default(self):
+        with self.assertRaisesRegex(ValueError, "Unknown params"):
+            await server.call_kis_api(
+                "domestic_stock",
+                "inquire_price",
+                {
+                    "fid_cond_mrkt_div_code": "J",
+                    "fid_input_iscd": "005930",
+                    "typo_param": "bad",
+                },
+            )
 
     async def test_generic_call_fills_account_and_selects_virtual_trid(self):
         env = {
@@ -176,6 +205,35 @@ class KisRequestTests(unittest.IsolatedAsyncioTestCase):
                     },
                 )
 
+    async def test_generic_post_blocks_trading_when_gate_is_disabled(self):
+        env = {
+            "KIS_APP_KEY": "app",
+            "KIS_APP_SECRET": "secret",
+            "KIS_ACCOUNT_TYPE": "REAL",
+            "KIS_CANO": "12345678",
+            "KIS_ACNT_PRDT_CD": "01",
+        }
+        client = StubClient(StubResponse({"rt_cd": "0"}))
+
+        with patch.dict(os.environ, env, clear=True), \
+             patch.object(server, "get_http_client", AsyncMock(return_value=client)), \
+             patch.object(server, "get_access_token", AsyncMock(return_value="token")):
+            with self.assertRaisesRegex(PermissionError, "KIS_ENABLE_TRADING"):
+                await server.call_kis_api(
+                    "domestic_stock",
+                    "order_cash",
+                    {
+                        "excg_id_dvsn_cd": "KRX",
+                        "ord_dv": "buy",
+                        "ord_dvsn": "00",
+                        "ord_qty": "1",
+                        "ord_unpr": "70000",
+                        "pdno": "005930",
+                    },
+                )
+
+        self.assertEqual(client.calls, [])
+
     async def test_generic_post_uses_hashkey_and_json_body(self):
         env = {
             "KIS_APP_KEY": "app",
@@ -183,6 +241,7 @@ class KisRequestTests(unittest.IsolatedAsyncioTestCase):
             "KIS_ACCOUNT_TYPE": "REAL",
             "KIS_CANO": "12345678",
             "KIS_ACNT_PRDT_CD": "01",
+            "KIS_ENABLE_TRADING": "true",
         }
         client = StubClient(StubResponse({"rt_cd": "0"}))
 
@@ -210,6 +269,27 @@ class KisRequestTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(client.calls[0]["json"]["CANO"], "12345678")
         self.assertEqual(client.calls[0]["json"]["PDNO"], "005930")
 
+    async def test_legacy_order_stock_delegates_to_catalog_order_cash(self):
+        env = {
+            "KIS_APP_KEY": "app",
+            "KIS_APP_SECRET": "secret",
+            "KIS_ACCOUNT_TYPE": "REAL",
+            "KIS_CANO": "12345678",
+            "KIS_ACNT_PRDT_CD": "01",
+            "KIS_ENABLE_TRADING": "true",
+        }
+        client = StubClient(StubResponse({"rt_cd": "0"}))
+
+        with patch.dict(os.environ, env, clear=True), \
+             patch.object(server, "get_http_client", AsyncMock(return_value=client)), \
+             patch.object(server, "get_access_token", AsyncMock(return_value="token")), \
+             patch.object(server, "get_hashkey", AsyncMock(return_value="hash")):
+            await server.order_stock("005930", 1, 0, "buy")
+
+        self.assertEqual(client.calls[0]["headers"]["tr_id"], "TTTC0012U")
+        self.assertEqual(client.calls[0]["json"]["EXCG_ID_DVSN_CD"], "KRX")
+        self.assertEqual(client.calls[0]["json"]["ORD_DVSN"], "01")
+
     async def test_generic_post_infers_virtual_domestic_sell_trid(self):
         env = {
             "KIS_APP_KEY": "app",
@@ -217,6 +297,7 @@ class KisRequestTests(unittest.IsolatedAsyncioTestCase):
             "KIS_ACCOUNT_TYPE": "VIRTUAL",
             "KIS_CANO": "12345678",
             "KIS_ACNT_PRDT_CD": "01",
+            "KIS_ENABLE_TRADING": "true",
         }
         client = StubClient(StubResponse({"rt_cd": "0"}))
 
@@ -247,6 +328,7 @@ class KisRequestTests(unittest.IsolatedAsyncioTestCase):
             "KIS_ACCOUNT_TYPE": "REAL",
             "KIS_CANO": "12345678",
             "KIS_ACNT_PRDT_CD": "01",
+            "KIS_ENABLE_TRADING": "true",
         }
         client = StubClient(StubResponse({"rt_cd": "0"}))
 
@@ -280,6 +362,7 @@ class KisRequestTests(unittest.IsolatedAsyncioTestCase):
             "KIS_ACCOUNT_TYPE": "VIRTUAL",
             "KIS_CANO": "12345678",
             "KIS_ACNT_PRDT_CD": "01",
+            "KIS_ENABLE_TRADING": "true",
         }
         client = StubClient(StubResponse({"rt_cd": "0"}))
 
@@ -305,6 +388,28 @@ class KisRequestTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertTrue(client.calls[0]["url"].startswith(server.VIRTUAL_DOMAIN))
         self.assertEqual(client.calls[0]["headers"]["tr_id"], "VTTS1002U")
+
+    async def test_legacy_overseas_order_uses_catalog_hashkey_and_virtual_sell_trid(self):
+        env = {
+            "KIS_APP_KEY": "app",
+            "KIS_APP_SECRET": "secret",
+            "KIS_ACCOUNT_TYPE": "VIRTUAL",
+            "KIS_CANO": "12345678",
+            "KIS_ACNT_PRDT_CD": "01",
+            "KIS_ENABLE_TRADING": "true",
+        }
+        client = StubClient(StubResponse({"rt_cd": "0"}))
+
+        with patch.dict(os.environ, env, clear=True), \
+             patch.object(server, "get_http_client", AsyncMock(return_value=client)), \
+             patch.object(server, "get_access_token", AsyncMock(return_value="token")), \
+             patch.object(server, "get_hashkey", AsyncMock(return_value="hash")):
+            await server.order_overseas_stock("AAPL", 1, 190.5, "sell", "NASD")
+
+        self.assertTrue(client.calls[0]["url"].startswith(server.VIRTUAL_DOMAIN))
+        self.assertEqual(client.calls[0]["headers"]["tr_id"], "VTTT1006U")
+        self.assertEqual(client.calls[0]["headers"]["hashkey"], "hash")
+        self.assertEqual(client.calls[0]["json"]["OVRS_EXCG_CD"], "NASD")
 
     async def test_balance_request_uses_configured_account_product_code(self):
         env = {
@@ -374,7 +479,7 @@ class KisRequestTests(unittest.IsolatedAsyncioTestCase):
                 "KIS_TOKEN_FILE": str(token_file),
             }
             client = StubClient(StubResponse({"access_token": "new-token"}))
-            server._token_cache.update({"token": None, "expires_at": None, "app_key": None})
+            server._token_cache.update({"token": None, "expires_at": None, "app_key": None, "token_scope": None})
 
             with patch.dict(os.environ, env, clear=True):
                 token = await server.get_access_token(client)
@@ -383,7 +488,44 @@ class KisRequestTests(unittest.IsolatedAsyncioTestCase):
             cached = json.loads(token_file.read_text())
             self.assertEqual(cached["token"], "new-token")
             self.assertEqual(cached["app_key"], "app")
+            self.assertEqual(cached["token_scope"], "real")
             self.assertEqual(client.calls[0]["timeout"], 30.0)
+
+    async def test_access_token_uses_virtual_domain_for_virtual_account(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            token_file = Path(tmpdir) / "token.json"
+            env = {
+                "KIS_APP_KEY": "app",
+                "KIS_APP_SECRET": "secret",
+                "KIS_ACCOUNT_TYPE": "VIRTUAL",
+                "KIS_TOKEN_FILE": str(token_file),
+            }
+            client = StubClient(StubResponse({"access_token": "virtual-token"}))
+            server._token_cache.update({"token": None, "expires_at": None, "app_key": None, "token_scope": None})
+
+            with patch.dict(os.environ, env, clear=True):
+                token = await server.get_access_token(client)
+
+            self.assertEqual(token, "virtual-token")
+            self.assertTrue(client.calls[0]["url"].startswith(server.VIRTUAL_DOMAIN))
+            cached = json.loads(token_file.read_text())
+            self.assertEqual(cached["token_scope"], "virtual")
+
+    async def test_overseas_price_converts_order_market_to_quote_exchange(self):
+        env = {
+            "KIS_APP_KEY": "app",
+            "KIS_APP_SECRET": "secret",
+            "KIS_ACCOUNT_TYPE": "VIRTUAL",
+        }
+        client = StubClient(StubResponse({"output": {"last": "190.5"}}))
+
+        with patch.dict(os.environ, env, clear=True), \
+             patch.object(server, "get_http_client", AsyncMock(return_value=client)), \
+             patch.object(server, "get_access_token", AsyncMock(return_value="token")):
+            await server.inquery_overseas_stock_price("AAPL", "NASD")
+
+        self.assertTrue(client.calls[0]["url"].startswith(server.DOMAIN))
+        self.assertEqual(client.calls[0]["params"]["EXCD"], "NAS")
 
 
 if __name__ == "__main__":
