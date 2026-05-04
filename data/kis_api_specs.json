@@ -119,6 +119,20 @@
               "required": true,
               "type": "str",
               "wire_name": "VRFC_KIND_CD"
+            },
+            {
+              "default": "",
+              "name": "fk100",
+              "required": false,
+              "type": "str",
+              "wire_name": "CTX_AREA_FK100"
+            },
+            {
+              "default": "",
+              "name": "nk30",
+              "required": false,
+              "type": "str",
+              "wire_name": "CTX_AREA_NK30"
             }
           ],
           "path": "/uapi/domestic-bond/v1/quotations/avg-unit",
@@ -284,6 +298,20 @@
               "required": true,
               "type": "str",
               "wire_name": "PDNO"
+            },
+            {
+              "default": "",
+              "name": "fk200",
+              "required": false,
+              "type": "str",
+              "wire_name": "CTX_AREA_FK200"
+            },
+            {
+              "default": "",
+              "name": "nk200",
+              "required": false,
+              "type": "str",
+              "wire_name": "CTX_AREA_NK200"
             }
           ],
           "path": "/uapi/domestic-bond/v1/trading/inquire-balance",
@@ -961,6 +989,20 @@
               "required": true,
               "type": "str",
               "wire_name": "MGNA_DVSN"
+            },
+            {
+              "default": "",
+              "name": "fk200",
+              "required": false,
+              "type": "str",
+              "wire_name": "CTX_AREA_FK200"
+            },
+            {
+              "default": "",
+              "name": "nk200",
+              "required": false,
+              "type": "str",
+              "wire_name": "CTX_AREA_NK200"
             }
           ],
           "path": "/uapi/domestic-futureoption/v1/trading/inquire-balance",
@@ -996,6 +1038,20 @@
               "required": true,
               "type": "str",
               "wire_name": "INQR_DT"
+            },
+            {
+              "default": "",
+              "name": "fk200",
+              "required": false,
+              "type": "str",
+              "wire_name": "CTX_AREA_FK200"
+            },
+            {
+              "default": "",
+              "name": "nk200",
+              "required": false,
+              "type": "str",
+              "wire_name": "CTX_AREA_NK200"
             }
           ],
           "path": "/uapi/domestic-futureoption/v1/trading/inquire-balance-settlement-pl",
@@ -1037,6 +1093,20 @@
               "required": true,
               "type": "str",
               "wire_name": "MGNA_DVSN"
+            },
+            {
+              "default": "",
+              "name": "fk200",
+              "required": false,
+              "type": "str",
+              "wire_name": "CTX_AREA_FK200"
+            },
+            {
+              "default": "",
+              "name": "nk200",
+              "required": false,
+              "type": "str",
+              "wire_name": "CTX_AREA_NK200"
             }
           ],
           "path": "/uapi/domestic-futureoption/v1/trading/inquire-balance-valuation-pl",
@@ -1120,6 +1190,20 @@
               "required": true,
               "type": "str",
               "wire_name": "STRT_ORD_DT"
+            },
+            {
+              "default": "",
+              "name": "fk200",
+              "required": false,
+              "type": "str",
+              "wire_name": "CTX_AREA_FK200"
+            },
+            {
+              "default": "",
+              "name": "nk200",
+              "required": false,
+              "type": "str",
+              "wire_name": "CTX_AREA_NK200"
             }
           ],
           "path": "/uapi/domestic-futureoption/v1/trading/inquire-ccnl",
@@ -1169,6 +1253,20 @@
               "required": true,
               "type": "str",
               "wire_name": "ORD_DT"
+            },
+            {
+              "default": "",
+              "name": "fk200",
+              "required": false,
+              "type": "str",
+              "wire_name": "CTX_AREA_FK200"
+            },
+            {
+              "default": "",
+              "name": "nk200",
+              "required": false,
+              "type": "str",
+              "wire_name": "CTX_AREA_NK200"
             }
           ],
           "path": "/uapi/domestic-futureoption/v1/trading/inquire-ccnl-bstime",
@@ -1210,6 +1308,20 @@
               "required": true,
               "type": "str",
               "wire_name": "INQR_STRT_DAY"
+            },
+            {
+              "default": "",
+              "name": "fk200",
+              "required": false,
+              "type": "str",
+              "wire_name": "CTX_AREA_FK200"
+            },
+            {
+              "default": "",
+              "name": "nk200",
+              "required": false,
+              "type": "str",
+              "wire_name": "CTX_AREA_NK200"
             }
           ],
           "path": "/uapi/domestic-futureoption/v1/trading/inquire-daily-amount-fee",
@@ -1333,6 +1445,20 @@
               "required": true,
               "type": "str",
               "wire_name": "MGNA_DVSN"
+            },
+            {
+              "default": "",
+              "name": "fk200",
+              "required": false,
+              "type": "str",
+              "wire_name": "CTX_AREA_FK200"
+            },
+            {
+              "default": "",
+              "name": "nk200",
+              "required": false,
+              "type": "str",
+              "wire_name": "CTX_AREA_NK200"
             }
           ],
           "path": "/uapi/domestic-futureoption/v1/trading/inquire-ngt-balance",
@@ -1430,6 +1556,20 @@
               "required": true,
               "type": "str",
               "wire_name": "STRT_ORD_DT"
+            },
+            {
+              "default": "",
+              "name": "fk200",
+              "required": false,
+              "type": "str",
+              "wire_name": "CTX_AREA_FK200"
+            },
+            {
+              "default": "",
+              "name": "nk200",
+              "required": false,
+              "type": "str",
+              "wire_name": "CTX_AREA_NK200"
             }
           ],
           "path": "/uapi/domestic-futureoption/v1/trading/inquire-ngt-ccnl",
@@ -1908,6 +2048,20 @@
               "required": true,
               "type": "str",
               "wire_name": "BASS_DT"
+            },
+            {
+              "default": "",
+              "name": "fk100",
+              "required": false,
+              "type": "str",
+              "wire_name": "CTX_AREA_FK"
+            },
+            {
+              "default": "",
+              "name": "nk100",
+              "required": false,
+              "type": "str",
+              "wire_name": "CTX_AREA_NK"
             }
           ],
           "path": "/uapi/domestic-stock/v1/quotations/chk-holiday",
@@ -1990,6 +2144,13 @@
               "required": false,
               "type": "str",
               "wire_name": "START_DATE"
+            },
+            {
+              "default": "",
+              "name": "cts",
+              "required": false,
+              "type": "str",
+              "wire_name": "CTS"
             }
           ],
           "path": "/uapi/domestic-stock/v1/quotations/daily-loan-trans",
@@ -2450,6 +2611,20 @@
               "required": true,
               "type": "str",
               "wire_name": "UNPR_DVSN"
+            },
+            {
+              "default": "",
+              "name": "fk100",
+              "required": false,
+              "type": "str",
+              "wire_name": "CTX_AREA_FK100"
+            },
+            {
+              "default": "",
+              "name": "nk100",
+              "required": false,
+              "type": "str",
+              "wire_name": "CTX_AREA_NK100"
             }
           ],
           "path": "/uapi/domestic-stock/v1/trading/inquire-balance",
@@ -2534,6 +2709,20 @@
               "required": true,
               "type": "str",
               "wire_name": "UNPR_DVSN"
+            },
+            {
+              "default": "",
+              "name": "fk100",
+              "required": false,
+              "type": "str",
+              "wire_name": "CTX_AREA_FK100"
+            },
+            {
+              "default": "",
+              "name": "nk100",
+              "required": false,
+              "type": "str",
+              "wire_name": "CTX_AREA_NK100"
             }
           ],
           "path": "/uapi/domestic-stock/v1/trading/inquire-balance-rlz-pl",
@@ -2741,6 +2930,20 @@
               "required": true,
               "type": "str",
               "wire_name": "SLL_BUY_DVSN_CD"
+            },
+            {
+              "default": "",
+              "name": "fk100",
+              "required": false,
+              "type": "str",
+              "wire_name": "CTX_AREA_FK100"
+            },
+            {
+              "default": "",
+              "name": "nk100",
+              "required": false,
+              "type": "str",
+              "wire_name": "CTX_AREA_NK100"
             }
           ],
           "path": "/uapi/domestic-stock/v1/trading/inquire-daily-ccld",
@@ -3372,6 +3575,20 @@
               "required": true,
               "type": "str",
               "wire_name": "SORT_DVSN"
+            },
+            {
+              "default": "",
+              "name": "fk100",
+              "required": false,
+              "type": "str",
+              "wire_name": "CTX_AREA_FK100"
+            },
+            {
+              "default": "",
+              "name": "nk100",
+              "required": false,
+              "type": "str",
+              "wire_name": "CTX_AREA_NK100"
             }
           ],
           "path": "/uapi/domestic-stock/v1/trading/inquire-period-profit",
@@ -3434,6 +3651,20 @@
               "required": true,
               "type": "str",
               "wire_name": "SORT_DVSN"
+            },
+            {
+              "default": "",
+              "name": "fk100",
+              "required": false,
+              "type": "str",
+              "wire_name": "CTX_AREA_FK100"
+            },
+            {
+              "default": "",
+              "name": "nk100",
+              "required": false,
+              "type": "str",
+              "wire_name": "CTX_AREA_NK100"
             }
           ],
           "path": "/uapi/domestic-stock/v1/trading/inquire-period-trade-profit",
@@ -3592,6 +3823,20 @@
               "required": true,
               "type": "str",
               "wire_name": "INQR_DVSN_2"
+            },
+            {
+              "default": "",
+              "name": "fk100",
+              "required": false,
+              "type": "str",
+              "wire_name": "CTX_AREA_FK100"
+            },
+            {
+              "default": "",
+              "name": "nk100",
+              "required": false,
+              "type": "str",
+              "wire_name": "CTX_AREA_NK100"
             }
           ],
           "path": "/uapi/domestic-stock/v1/trading/inquire-psbl-rvsecncl",
@@ -5248,6 +5493,20 @@
               "required": true,
               "type": "str",
               "wire_name": "TMNL_MDIA_KIND_CD"
+            },
+            {
+              "default": "",
+              "name": "fk200",
+              "required": false,
+              "type": "str",
+              "wire_name": "CTX_AREA_FK200"
+            },
+            {
+              "default": "",
+              "name": "nk200",
+              "required": false,
+              "type": "str",
+              "wire_name": "CTX_AREA_NK200"
             }
           ],
           "path": "/uapi/domestic-stock/v1/trading/order-resv-ccnl",
@@ -5499,6 +5758,20 @@
               "required": true,
               "type": "str",
               "wire_name": "INQR_DVSN"
+            },
+            {
+              "default": "",
+              "name": "fk100",
+              "required": false,
+              "type": "str",
+              "wire_name": "CTX_AREA_FK100"
+            },
+            {
+              "default": "",
+              "name": "nk100",
+              "required": false,
+              "type": "str",
+              "wire_name": "CTX_AREA_NK100"
             }
           ],
           "path": "/uapi/domestic-stock/v1/trading/pension/inquire-balance",
@@ -5554,6 +5827,20 @@
               "required": true,
               "type": "str",
               "wire_name": "USER_DVSN_CD"
+            },
+            {
+              "default": "",
+              "name": "fk100",
+              "required": false,
+              "type": "str",
+              "wire_name": "CTX_AREA_FK100"
+            },
+            {
+              "default": "",
+              "name": "nk100",
+              "required": false,
+              "type": "str",
+              "wire_name": "CTX_AREA_NK100"
             }
           ],
           "path": "/uapi/domestic-stock/v1/trading/pension/inquire-daily-ccld",
@@ -5622,6 +5909,20 @@
               "required": true,
               "type": "str",
               "wire_name": "USER_DVSN_CD"
+            },
+            {
+              "default": "",
+              "name": "fk100",
+              "required": false,
+              "type": "str",
+              "wire_name": "CTX_AREA_FK100"
+            },
+            {
+              "default": "",
+              "name": "nk100",
+              "required": false,
+              "type": "str",
+              "wire_name": "CTX_AREA_NK100"
             }
           ],
           "path": "/uapi/domestic-stock/v1/trading/pension/inquire-present-balance",
@@ -5767,6 +6068,20 @@
               "required": false,
               "type": "str",
               "wire_name": "RGHT_TYPE_CD"
+            },
+            {
+              "default": "",
+              "name": "fk100",
+              "required": false,
+              "type": "str",
+              "wire_name": "CTX_AREA_FK100"
+            },
+            {
+              "default": "",
+              "name": "nk100",
+              "required": false,
+              "type": "str",
+              "wire_name": "CTX_AREA_NK100"
             }
           ],
           "path": "/uapi/domestic-stock/v1/trading/period-rights",
@@ -5848,6 +6163,13 @@
               "required": true,
               "type": "str",
               "wire_name": "user_id"
+            },
+            {
+              "default": "",
+              "name": "seq",
+              "required": false,
+              "type": "str",
+              "wire_name": "seq"
             }
           ],
           "path": "/uapi/domestic-stock/v1/quotations/psearch-result",
@@ -7570,6 +7892,20 @@
               "required": true,
               "type": "str",
               "wire_name": "TRAD_DT"
+            },
+            {
+              "default": "",
+              "name": "fk200",
+              "required": false,
+              "type": "str",
+              "wire_name": "CTX_AREA_FK200"
+            },
+            {
+              "default": "",
+              "name": "nk200",
+              "required": false,
+              "type": "str",
+              "wire_name": "CTX_AREA_NK200"
             }
           ],
           "path": "/uapi/overseas-stock/v1/trading/algo-ordno",
@@ -7936,6 +8272,20 @@
               "required": false,
               "type": "str",
               "wire_name": "TTLZ_ICLD_YN"
+            },
+            {
+              "default": "",
+              "name": "fk200",
+              "required": false,
+              "type": "str",
+              "wire_name": "CTX_AREA_FK200"
+            },
+            {
+              "default": "",
+              "name": "nk200",
+              "required": false,
+              "type": "str",
+              "wire_name": "CTX_AREA_NK200"
             }
           ],
           "path": "/uapi/overseas-stock/v1/trading/inquire-algo-ccnl",
@@ -8011,6 +8361,20 @@
               "required": true,
               "type": "str",
               "wire_name": "TR_CRCY_CD"
+            },
+            {
+              "default": "",
+              "name": "fk200",
+              "required": false,
+              "type": "str",
+              "wire_name": "CTX_AREA_FK200"
+            },
+            {
+              "default": "",
+              "name": "nk200",
+              "required": false,
+              "type": "str",
+              "wire_name": "CTX_AREA_NK200"
             }
           ],
           "path": "/uapi/overseas-stock/v1/trading/inquire-balance",
@@ -8109,6 +8473,20 @@
               "required": true,
               "type": "str",
               "wire_name": "SORT_SQN"
+            },
+            {
+              "default": "",
+              "name": "fk200",
+              "required": false,
+              "type": "str",
+              "wire_name": "CTX_AREA_FK200"
+            },
+            {
+              "default": "",
+              "name": "nk200",
+              "required": false,
+              "type": "str",
+              "wire_name": "CTX_AREA_NK200"
             }
           ],
           "path": "/uapi/overseas-stock/v1/trading/inquire-ccnl",
@@ -8199,6 +8577,20 @@
               "required": true,
               "type": "str",
               "wire_name": "SORT_SQN"
+            },
+            {
+              "default": "",
+              "name": "fk200",
+              "required": false,
+              "type": "str",
+              "wire_name": "CTX_AREA_FK200"
+            },
+            {
+              "default": "",
+              "name": "nk200",
+              "required": false,
+              "type": "str",
+              "wire_name": "CTX_AREA_NK200"
             }
           ],
           "path": "/uapi/overseas-stock/v1/trading/inquire-nccs",
@@ -8323,6 +8715,20 @@
               "required": true,
               "type": "str",
               "wire_name": "WCRC_FRCR_DVSN_CD"
+            },
+            {
+              "default": "",
+              "name": "fk200",
+              "required": false,
+              "type": "str",
+              "wire_name": "CTX_AREA_FK200"
+            },
+            {
+              "default": "",
+              "name": "nk200",
+              "required": false,
+              "type": "str",
+              "wire_name": "CTX_AREA_NK200"
             }
           ],
           "path": "/uapi/overseas-stock/v1/trading/inquire-period-profit",
@@ -8392,6 +8798,20 @@
               "required": true,
               "type": "str",
               "wire_name": "SLL_BUY_DVSN_CD"
+            },
+            {
+              "default": "",
+              "name": "fk100",
+              "required": false,
+              "type": "str",
+              "wire_name": "CTX_AREA_FK100"
+            },
+            {
+              "default": "",
+              "name": "nk100",
+              "required": false,
+              "type": "str",
+              "wire_name": "CTX_AREA_NK100"
             }
           ],
           "path": "/uapi/overseas-stock/v1/trading/inquire-period-trans",
@@ -8906,6 +9326,13 @@
               "required": true,
               "type": "str",
               "wire_name": "PDNO"
+            },
+            {
+              "default": "",
+              "name": "sll_type",
+              "required": false,
+              "type": "str",
+              "wire_name": "SLL_TYPE"
             }
           ],
           "path": "/uapi/overseas-stock/v1/trading/order",
@@ -9158,6 +9585,20 @@
               "required": false,
               "type": "str",
               "wire_name": "PRDT_TYPE_CD"
+            },
+            {
+              "default": "",
+              "name": "fk200",
+              "required": false,
+              "type": "str",
+              "wire_name": "CTX_AREA_FK200"
+            },
+            {
+              "default": "",
+              "name": "nk200",
+              "required": false,
+              "type": "str",
+              "wire_name": "CTX_AREA_NK200"
             }
           ],
           "path": "/uapi/overseas-stock/v1/trading/order-resv-list",
@@ -9298,6 +9739,20 @@
               "required": true,
               "type": "str",
               "wire_name": "RGHT_TYPE_CD"
+            },
+            {
+              "default": "",
+              "name": "fk50",
+              "required": false,
+              "type": "str",
+              "wire_name": "CTX_AREA_FK50"
+            },
+            {
+              "default": "",
+              "name": "nk50",
+              "required": false,
+              "type": "str",
+              "wire_name": "CTX_AREA_NK50"
             }
           ],
           "path": "/uapi/overseas-price/v1/quotations/period-rights",

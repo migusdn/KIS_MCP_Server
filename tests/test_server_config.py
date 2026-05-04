@@ -114,6 +114,16 @@ class KisRequestTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertNotIn("description", json.dumps(spec, ensure_ascii=False).lower())
 
+    async def test_overseas_balance_spec_includes_continuation_keys_from_examples(self):
+        spec = await server.get_kis_api_spec("overseas_stock", "inquire_balance")
+
+        params_by_wire = {param["wire_name"]: param for param in spec["params"]}
+
+        self.assertEqual(params_by_wire["CTX_AREA_FK200"]["default"], "")
+        self.assertEqual(params_by_wire["CTX_AREA_NK200"]["default"], "")
+        self.assertFalse(params_by_wire["CTX_AREA_FK200"]["required"])
+        self.assertFalse(params_by_wire["CTX_AREA_NK200"]["required"])
+
     async def test_generic_call_maps_lowercase_params_to_wire_keys(self):
         env = {
             "KIS_APP_KEY": "app",
@@ -184,6 +194,35 @@ class KisRequestTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(client.calls[0]["headers"]["tr_id"], "VTTC8434R")
         self.assertEqual(client.calls[0]["params"]["CANO"], "12345678")
         self.assertEqual(client.calls[0]["params"]["ACNT_PRDT_CD"], "22")
+
+    async def test_overseas_balance_defaults_required_continuation_keys(self):
+        env = {
+            "KIS_APP_KEY": "app",
+            "KIS_APP_SECRET": "secret",
+            "KIS_ACCOUNT_TYPE": "REAL",
+            "KIS_CANO": "12345678",
+            "KIS_ACNT_PRDT_CD": "01",
+        }
+        client = StubClient(StubResponse({"rt_cd": "0"}))
+
+        with patch.dict(os.environ, env, clear=True), \
+             patch.object(server, "get_http_client", AsyncMock(return_value=client)), \
+             patch.object(server, "get_access_token", AsyncMock(return_value="token")):
+            result = await server.call_kis_api(
+                "overseas_stock",
+                "inquire_balance",
+                {
+                    "ovrs_excg_cd": "NASD",
+                    "tr_crcy_cd": "USD",
+                },
+            )
+
+        self.assertEqual(result, {"rt_cd": "0"})
+        self.assertEqual(client.calls[0]["headers"]["tr_id"], "TTTS3012R")
+        self.assertEqual(client.calls[0]["params"]["OVRS_EXCG_CD"], "NASD")
+        self.assertEqual(client.calls[0]["params"]["TR_CRCY_CD"], "USD")
+        self.assertEqual(client.calls[0]["params"]["CTX_AREA_FK200"], "")
+        self.assertEqual(client.calls[0]["params"]["CTX_AREA_NK200"], "")
 
     async def test_generic_post_requires_explicit_trid_when_side_is_unknown(self):
         with patch.dict(
