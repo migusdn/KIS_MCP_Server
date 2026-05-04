@@ -52,6 +52,8 @@ KIS_ENABLE_TRADING=true
 
 ## 설치
 
+상세한 LLM/MCP 클라이언트별 설치 가이드는 [`INSTALL.md`](INSTALL.md)를 참고하세요.
+
 ```bash
 pip install uv
 uv sync
@@ -72,16 +74,13 @@ KIS_ACNT_PRDT_CD="01"
 
 ```bash
 # stdio, 로컬 MCP 클라이언트 권장
-uv run kis-mcp-server
-
-# 직접 실행
 uv run python server.py
 ```
 
 명령줄 인자로도 설정할 수 있습니다.
 
 ```bash
-uv run kis-mcp-server \
+uv run python server.py \
   --app-key "앱키" \
   --app-secret "시크릿키" \
   --account-type "REAL" \
@@ -92,9 +91,9 @@ uv run kis-mcp-server \
 Transport 선택:
 
 ```bash
-MCP_TYPE=stdio uv run kis-mcp-server
-MCP_TYPE=streamable-http MCP_HOST=127.0.0.1 MCP_PORT=8000 MCP_PATH=/mcp uv run kis-mcp-server
-MCP_TYPE=sse MCP_HOST=127.0.0.1 MCP_PORT=8000 MCP_PATH=/sse uv run kis-mcp-server
+MCP_TYPE=stdio uv run python server.py
+MCP_TYPE=streamable-http MCP_HOST=127.0.0.1 MCP_PORT=8000 MCP_PATH=/mcp uv run python server.py
+MCP_TYPE=sse MCP_HOST=127.0.0.1 MCP_PORT=8000 MCP_PATH=/sse uv run python server.py
 ```
 
 MCP 클라이언트 등록 예시:
@@ -104,7 +103,7 @@ MCP 클라이언트 등록 예시:
   "mcpServers": {
     "kis-mcp-server": {
       "command": "uv",
-      "args": ["run", "kis-mcp-server"],
+      "args": ["run", "python", "server.py"],
       "cwd": "<project-root>"
     }
   }
