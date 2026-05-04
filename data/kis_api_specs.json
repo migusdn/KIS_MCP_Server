@@ -10129,7 +10129,7 @@
       "examples",
       "response prose"
     ],
-    "kind": "koreainvestment/open-trading-api interface metadata"
+    "kind": "KIS REST API interface metadata"
   },
   "total_apis": 166
 }

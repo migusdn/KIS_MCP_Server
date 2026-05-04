@@ -9,3 +9,22 @@ token.json
 
 # OS
 .DS_Store
+
+# Local KIS catalog/live-check helper scripts
+collect_kis*.py
+scripts/collect_kis*.py
+kis_*_check.py
+*kis*_token*.json
+
+# Local AI agent/runtime artifacts
+.omx/
+.codex/
+.agents/
+AGENTS.md
+CLAUDE.md
+GEMINI.md
+.aider*
+.cursor/
+.windsurf/
+
+docs/
