@@ -1,7 +1,14 @@
+[![MseeP.ai Security Assessment Badge](https://mseep.net/pr/migusdn-kis-mcp-server-badge.png)](https://mseep.ai/app/migusdn-kis-mcp-server)
+
 # 한국투자증권 REST API MCP (Model Context Protocol)
 
 [![Python 3.13+](https://img.shields.io/badge/python-3.13+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Verified on MseeP](https://mseep.ai/badge.svg)](https://mseep.ai/app/51ce86bd-d78d-48da-8227-1e5cf29157d5)
+
+<a href="https://glama.ai/mcp/servers/@migusdn/KIS_MCP_Server">
+  <img width="380" height="200" src="https://glama.ai/mcp/servers/@migusdn/KIS_MCP_Server/badge" alt="KIS REST API Server MCP server" />
+</a>
 
 한국투자증권(KIS) REST API를 MCP 도구로 호출하는 서버입니다. 국내/해외 주식 조회, 계좌 조회, 주문 관련 API를 카탈로그 기반 범용 도구와 자주 쓰는 편의 도구로 제공합니다.
 
