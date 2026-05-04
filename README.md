@@ -156,18 +156,36 @@ MCP 클라이언트 등록 예시:
 
 ### 도구 로드 최적화
 
-MCP 클라이언트는 서버 연결 시 도구 이름, 설명, 입력 스키마를 컨텍스트에 올립니다. 도구 컨텍스트를 줄이고 싶으면 카탈로그 도구 3개만 노출할 수 있습니다.
+MCP 클라이언트는 서버 연결 시 도구 이름, 설명, 입력 스키마를 컨텍스트에 올립니다. 편의 도구를 많이 노출할수록 대화 시작 시점의 컨텍스트 사용량이 늘어나므로, 필요한 경우 카탈로그 도구 3개만 노출하는 경량 모드를 사용할 수 있습니다.
 
 ```bash
 KIS_MCP_TOOLSET=catalog uv run python server.py
 ```
 
-| 값 | 노출 도구 | 용도 |
-|---|---|---|
-| `full` | 카탈로그 도구 + 편의 도구 전체 | 기존 동작과 호환 |
-| `catalog` | `list-kis-api-specs`, `get-kis-api-spec`, `call-kis-api` | 낮은 컨텍스트 사용량 |
+| 값 | 노출 도구 수 | 노출 도구 | 용도 |
+|---|---:|---|---|
+| `full` | 15개 | 카탈로그 도구 + 편의 도구 전체 | 기존 동작과 호환 |
+| `catalog` | 3개 | `list-kis-api-specs`, `get-kis-api-spec`, `call-kis-api` | 낮은 컨텍스트 사용량 |
 
-`catalog` 모드에서도 166개 API는 `call-kis-api`로 모두 호출할 수 있습니다. 필요한 상세 파라미터는 `get-kis-api-spec`로 그때그때 조회합니다.
+`catalog` 모드는 MCP 도구 스키마 로드량을 줄이기 위한 모드입니다. 편의 도구는 숨기지만, 166개 API는 그대로 `call-kis-api`로 호출할 수 있습니다. 필요한 API는 `list-kis-api-specs`로 찾고, 필요한 상세 파라미터는 `get-kis-api-spec`로 그때그때 조회하면 됩니다.
+
+권장 사용 흐름:
+
+1. `list-kis-api-specs`로 API를 검색합니다.
+2. `get-kis-api-spec`로 필수 파라미터, 예시값, 코드값을 확인합니다.
+3. `call-kis-api`로 실제 API를 호출합니다.
+
+MCP 클라이언트 설정에서도 환경변수만 추가하면 됩니다.
+
+```json
+{
+  "env": {
+    "KIS_MCP_TOOLSET": "catalog"
+  }
+}
+```
+
+자주 쓰는 편의 도구를 도구 목록에 직접 노출하고 싶으면 기본값인 `full`을 사용하세요.
 
 ## `call-kis-api` 예시
 
