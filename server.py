@@ -129,7 +129,13 @@ def run_mcp_server(config: RuntimeConfig) -> None:
 
 
 def main(argv: list[str] | None = None) -> None:
-    config = configure_runtime(argv)
+    try:
+        config = configure_runtime(argv)
+        validate_kis_credentials(require_account=True)
+    except (FileNotFoundError, ValueError) as exc:
+        logger.error("%s", exc)
+        sys.exit(1)
+
     run_mcp_server(config)
 
 
@@ -274,39 +280,167 @@ class TrIdManager:
         return DOMAIN if is_real_account else VIRTUAL_DOMAIN
 
 # Token storage
-TOKEN_FILE = Path("token.json")
+TOKEN_FILE = Path(os.getenv("KIS_TOKEN_FILE", "token.json"))
+DEFAULT_ACNT_PRDT_CD = "01"
+
+_http_client: httpx.AsyncClient | None = None
+_token_cache = {
+    "token": None,
+    "expires_at": None,
+    "app_key": None,
+}
+
+
+def get_token_file() -> Path:
+    """Return the token cache file path, allowing tests/users to override it."""
+
+    return Path(os.getenv("KIS_TOKEN_FILE", str(TOKEN_FILE)))
+
+
+def get_account_product_code() -> str:
+    """Return account product code; KIS stock accounts usually use 01."""
+
+    return os.getenv("KIS_ACNT_PRDT_CD") or os.getenv("KIS_ACNT_PRDT_CODE") or DEFAULT_ACNT_PRDT_CD
+
+
+def get_account_number() -> str:
+    cano = os.getenv("KIS_CANO")
+    if not cano:
+        raise ValueError("Missing required environment variable: KIS_CANO")
+    return cano
+
+
+def validate_kis_credentials(require_account: bool = False) -> None:
+    required = ["KIS_APP_KEY", "KIS_APP_SECRET", "KIS_ACCOUNT_TYPE"]
+    if require_account:
+        required.append("KIS_CANO")
+
+    missing = [name for name in required if not os.getenv(name)]
+    if missing:
+        raise ValueError(
+            "Missing required environment variables: "
+            + ", ".join(missing)
+            + ". 환경변수, .env 또는 명령줄 인자로 설정하세요."
+        )
+
+    account_type = os.getenv("KIS_ACCOUNT_TYPE", "").upper()
+    if account_type not in {"REAL", "VIRTUAL"}:
+        raise ValueError('KIS_ACCOUNT_TYPE must be either "REAL" or "VIRTUAL"')
+
+
+async def get_http_client() -> httpx.AsyncClient:
+    """Return a shared async HTTP client for KIS API calls."""
+
+    global _http_client
+    if _http_client is None or _http_client.is_closed:
+        _http_client = httpx.AsyncClient(
+            timeout=httpx.Timeout(30.0),
+            limits=httpx.Limits(
+                max_keepalive_connections=10,
+                max_connections=20,
+                keepalive_expiry=60,
+            ),
+        )
+    return _http_client
+
+
+class _KisClientContext:
+    async def __aenter__(self) -> httpx.AsyncClient:
+        return await get_http_client()
+
+    async def __aexit__(self, exc_type, exc, tb) -> bool:
+        return False
+
+
+def kis_client() -> _KisClientContext:
+    """Context manager that preserves existing call structure while reusing one client."""
+
+    return _KisClientContext()
+
+
+async def close_http_client() -> None:
+    global _http_client
+    if _http_client is not None and not _http_client.is_closed:
+        await _http_client.aclose()
+    _http_client = None
+
+
+def kis_headers(token: str, tr_id: str | None = None, hashkey: str | None = None) -> dict[str, str]:
+    validate_kis_credentials(require_account=False)
+    headers = {
+        "content-type": CONTENT_TYPE,
+        "authorization": f"{AUTH_TYPE} {token}",
+        "appkey": os.environ["KIS_APP_KEY"],
+        "appsecret": os.environ["KIS_APP_SECRET"],
+    }
+    if tr_id:
+        headers["tr_id"] = tr_id
+    if hashkey:
+        headers["hashkey"] = hashkey
+    return headers
+
+
+def response_json(response: httpx.Response, error_message: str) -> dict:
+    if response.status_code != 200:
+        raise Exception(f"{error_message}: {response.text}")
+    try:
+        return response.json()
+    except ValueError as exc:
+        raise Exception(f"{error_message}: invalid JSON response") from exc
+
 
 def load_token():
     """Load token from file if it exists and is not expired"""
-    if TOKEN_FILE.exists():
+    token_file = get_token_file()
+    if token_file.exists():
         try:
-            with open(TOKEN_FILE, 'r') as f:
+            with open(token_file, 'r') as f:
                 token_data = json.load(f)
                 expires_at = datetime.fromisoformat(token_data['expires_at'])
+                cached_app_key = token_data.get("app_key")
+                current_app_key = os.getenv("KIS_APP_KEY")
+                if cached_app_key and current_app_key and cached_app_key != current_app_key:
+                    return None, None
                 if datetime.now() < expires_at:
                     return token_data['token'], expires_at
         except Exception as e:
             print(f"Error loading token: {e}", file=sys.stderr)
     return None, None
 
+
 def save_token(token: str, expires_at: datetime):
     """Save token to file"""
     try:
-        with open(TOKEN_FILE, 'w') as f:
+        token_file = get_token_file()
+        with open(token_file, 'w') as f:
             json.dump({
                 'token': token,
-                'expires_at': expires_at.isoformat()
+                'expires_at': expires_at.isoformat(),
+                'app_key': os.getenv("KIS_APP_KEY"),
             }, f)
     except Exception as e:
         print(f"Error saving token: {e}", file=sys.stderr)
+
 
 async def get_access_token(client: httpx.AsyncClient) -> str:
     """
     Get access token with file-based caching
     Returns cached token if valid, otherwise requests new token
     """
+    validate_kis_credentials(require_account=False)
+    current_app_key = os.environ["KIS_APP_KEY"]
+
+    if (
+        _token_cache["token"]
+        and _token_cache["expires_at"]
+        and _token_cache["app_key"] == current_app_key
+        and datetime.now() < _token_cache["expires_at"]
+    ):
+        return _token_cache["token"]
+
     token, expires_at = load_token()
     if token and expires_at and datetime.now() < expires_at:
+        _token_cache.update({"token": token, "expires_at": expires_at, "app_key": current_app_key})
         return token
     
     token_response = await client.post(
@@ -314,19 +448,20 @@ async def get_access_token(client: httpx.AsyncClient) -> str:
         headers={"content-type": CONTENT_TYPE},
         json={
             "grant_type": "client_credentials",
-            "appkey": os.environ["KIS_APP_KEY"],
+            "appkey": current_app_key,
             "appsecret": os.environ["KIS_APP_SECRET"]
-        }
+        },
+        timeout=30.0,
     )
-    
-    if token_response.status_code != 200:
-        raise Exception(f"Failed to get token: {token_response.text}")
-    
-    token_data = token_response.json()
+    token_data = response_json(token_response, "Failed to get token")
+    if "access_token" not in token_data:
+        raise Exception("Failed to get token: access_token missing in response")
+
     token = token_data["access_token"]
     
     expires_at = datetime.now() + timedelta(hours=23)
     save_token(token, expires_at)
+    _token_cache.update({"token": token, "expires_at": expires_at, "app_key": current_app_key})
     
     return token
 
@@ -344,19 +479,13 @@ async def get_hashkey(client: httpx.AsyncClient, token: str, body: dict) -> str:
     """
     response = await client.post(
         f"{TrIdManager.get_domain('buy')}{HASHKEY_PATH}",
-        headers={
-            "content-type": CONTENT_TYPE,
-            "authorization": f"{AUTH_TYPE} {token}",
-            "appkey": os.environ["KIS_APP_KEY"],
-            "appsecret": os.environ["KIS_APP_SECRET"],
-        },
+        headers=kis_headers(token, tr_id=""),
         json=body
     )
-    
-    if response.status_code != 200:
-        raise Exception(f"Failed to get hash key: {response.text}")
-    
-    return response.json()["HASH"]
+    data = response_json(response, "Failed to get hash key")
+    if "HASH" not in data:
+        raise Exception("Failed to get hash key: HASH missing in response")
+    return data["HASH"]
 
 @mcp.tool(
     name="inquery-stock-price",
@@ -383,27 +512,17 @@ async def inquery_stock_price(symbol: str):
         - stck_oprc: Opening price
         - stck_prdy_clpr: Previous day's closing price
     """
-    async with httpx.AsyncClient() as client:
+    async with kis_client() as client:
         token = await get_access_token(client)
         response = await client.get(
             f"{TrIdManager.get_domain('price')}{STOCK_PRICE_PATH}",
-            headers={
-                "content-type": CONTENT_TYPE,
-                "authorization": f"{AUTH_TYPE} {token}",
-                "appkey": os.environ["KIS_APP_KEY"],
-                "appsecret": os.environ["KIS_APP_SECRET"],
-                "tr_id": TrIdManager.get_tr_id("price")
-            },
+            headers=kis_headers(token, TrIdManager.get_tr_id("price")),
             params={
                 "fid_cond_mrkt_div_code": "J",
                 "fid_input_iscd": symbol
             }
         )
-        
-        if response.status_code != 200:
-            raise Exception(f"Failed to get stock price: {response.text}")
-        
-        return response.json()["output"]
+        return response_json(response, "Failed to get stock price")["output"]
 
 @mcp.tool(
     name="inquery-balance",
@@ -424,13 +543,13 @@ async def inquery_balance():
         - evlu_pfls_amt: Evaluation profit/loss amount
         - evlu_pfls_rt: Evaluation profit/loss rate
     """
-    async with httpx.AsyncClient() as client:
+    async with kis_client() as client:
         token = await get_access_token(client)
         logger.info(f"TrIdManager.get_tr_id('balance'): {TrIdManager.get_tr_id('balance')}")
         # Prepare request data
         request_data = {
-            "CANO": os.environ["KIS_CANO"],  # 계좌번호
-            "ACNT_PRDT_CD": "01",  # 계좌상품코드 (기본값: 01)
+            "CANO": get_account_number(),  # 계좌번호
+            "ACNT_PRDT_CD": get_account_product_code(),  # 계좌상품코드 (기본값: 01)
             "AFHR_FLPR_YN": "N",  # 시간외단일가여부
             "INQR_DVSN": "01",  # 조회구분
             "UNPR_DVSN": "01",  # 단가구분
@@ -443,20 +562,10 @@ async def inquery_balance():
         }
         response = await client.get(
             f"{TrIdManager.get_domain('balance')}{BALANCE_PATH}",
-            headers={
-                "content-type": CONTENT_TYPE,
-                "authorization": f"{AUTH_TYPE} {token}",
-                "appkey": os.environ["KIS_APP_KEY"],
-                "appsecret": os.environ["KIS_APP_SECRET"],
-                "tr_id": TrIdManager.get_tr_id("balance")
-            },
+            headers=kis_headers(token, TrIdManager.get_tr_id("balance")),
             params=request_data
         )
-        
-        if response.status_code != 200:
-            raise Exception(f"Failed to get balance: {response.text}")
-        
-        return response.json()
+        return response_json(response, "Failed to get balance")
 
 @mcp.tool(
     name="order-stock",
@@ -480,13 +589,13 @@ async def order_stock(symbol: str, quantity: int, price: int, order_type: str):
     if order_type not in ["buy", "sell"]:
         raise ValueError('order_type must be either "buy" or "sell"')
 
-    async with httpx.AsyncClient() as client:
+    async with kis_client() as client:
         token = await get_access_token(client)
         
         # Prepare request data
         request_data = {
-            "CANO": os.environ["KIS_CANO"],  # 계좌번호
-            "ACNT_PRDT_CD": "01",  # 계좌상품코드
+            "CANO": get_account_number(),  # 계좌번호
+            "ACNT_PRDT_CD": get_account_product_code(),  # 계좌상품코드
             "PDNO": symbol,  # 종목코드
             "ORD_DVSN": "01" if price == 0 else "00",  # 주문구분 (01: 시장가, 00: 지정가)
             "ORD_QTY": str(quantity),  # 주문수량
@@ -498,21 +607,10 @@ async def order_stock(symbol: str, quantity: int, price: int, order_type: str):
         
         response = await client.post(
             f"{TrIdManager.get_domain(order_type)}{ORDER_PATH}",
-            headers={
-                "content-type": CONTENT_TYPE,
-                "authorization": f"{AUTH_TYPE} {token}",
-                "appkey": os.environ["KIS_APP_KEY"],
-                "appsecret": os.environ["KIS_APP_SECRET"],
-                "tr_id": TrIdManager.get_tr_id(order_type),
-                "hashkey": hashkey
-            },
+            headers=kis_headers(token, TrIdManager.get_tr_id(order_type), hashkey=hashkey),
             json=request_data
         )
-        
-        if response.status_code != 200:
-            raise Exception(f"Failed to order stock: {response.text}")
-        
-        return response.json()
+        return response_json(response, "Failed to order stock")
 
 @mcp.tool(
     name="inquery-order-list",
@@ -529,13 +627,13 @@ async def inquery_order_list(start_date: str, end_date: str):
     Returns:
         Dictionary containing order list information
     """
-    async with httpx.AsyncClient() as client:
+    async with kis_client() as client:
         token = await get_access_token(client)
         
         # Prepare request data
         request_data = {
-            "CANO": os.environ["KIS_CANO"],  # 계좌번호
-            "ACNT_PRDT_CD": "01",  # 계좌상품코드
+            "CANO": get_account_number(),  # 계좌번호
+            "ACNT_PRDT_CD": get_account_product_code(),  # 계좌상품코드
             "INQR_STRT_DT": start_date,  # 조회시작일자
             "INQR_END_DT": end_date,  # 조회종료일자
             "SLL_BUY_DVSN_CD": "00",  # 매도매수구분
@@ -552,20 +650,10 @@ async def inquery_order_list(start_date: str, end_date: str):
         
         response = await client.get(
             f"{TrIdManager.get_domain('order_list')}{ORDER_LIST_PATH}",
-            headers={
-                "content-type": CONTENT_TYPE,
-                "authorization": f"{AUTH_TYPE} {token}",
-                "appkey": os.environ["KIS_APP_KEY"],
-                "appsecret": os.environ["KIS_APP_SECRET"],
-                "tr_id": TrIdManager.get_tr_id("order_list")
-            },
+            headers=kis_headers(token, TrIdManager.get_tr_id("order_list")),
             params=request_data
         )
-        
-        if response.status_code != 200:
-            raise Exception(f"Failed to get order list: {response.text}")
-        
-        return response.json()
+        return response_json(response, "Failed to get order list")
 
 @mcp.tool(
     name="inquery-order-detail",
@@ -582,13 +670,13 @@ async def inquery_order_detail(order_no: str, order_date: str):
     Returns:
         Dictionary containing order detail information
     """
-    async with httpx.AsyncClient() as client:
+    async with kis_client() as client:
         token = await get_access_token(client)
         
         # Prepare request data
         request_data = {
-            "CANO": os.environ["KIS_CANO"],  # 계좌번호
-            "ACNT_PRDT_CD": "01",  # 계좌상품코드
+            "CANO": get_account_number(),  # 계좌번호
+            "ACNT_PRDT_CD": get_account_product_code(),  # 계좌상품코드
             "INQR_DVSN": "00",  # 조회구분
             "PDNO": "",  # 종목코드
             "ORD_STRT_DT": order_date,  # 주문시작일자
@@ -605,20 +693,10 @@ async def inquery_order_detail(order_no: str, order_date: str):
         
         response = await client.get(
             f"{TrIdManager.get_domain('order_detail')}{ORDER_DETAIL_PATH}",
-            headers={
-                "content-type": CONTENT_TYPE,
-                "authorization": f"{AUTH_TYPE} {token}",
-                "appkey": os.environ["KIS_APP_KEY"],
-                "appsecret": os.environ["KIS_APP_SECRET"],
-                "tr_id": TrIdManager.get_tr_id("order_detail")
-            },
+            headers=kis_headers(token, TrIdManager.get_tr_id("order_detail")),
             params=request_data
         )
-        
-        if response.status_code != 200:
-            raise Exception(f"Failed to get order detail: {response.text}")
-        
-        return response.json()
+        return response_json(response, "Failed to get order detail")
 
 @mcp.tool(
     name="inquery-stock-info",
@@ -636,7 +714,7 @@ async def inquery_stock_info(symbol: str, start_date: str, end_date: str):
     Returns:
         Dictionary containing daily stock price information
     """
-    async with httpx.AsyncClient() as client:
+    async with kis_client() as client:
         token = await get_access_token(client)
         
         # Prepare request data
@@ -651,20 +729,10 @@ async def inquery_stock_info(symbol: str, start_date: str, end_date: str):
         
         response = await client.get(
             f"{TrIdManager.get_domain('stock_info')}{STOCK_INFO_PATH}",
-            headers={
-                "content-type": CONTENT_TYPE,
-                "authorization": f"{AUTH_TYPE} {token}",
-                "appkey": os.environ["KIS_APP_KEY"],
-                "appsecret": os.environ["KIS_APP_SECRET"],
-                "tr_id": TrIdManager.get_tr_id("stock_info")
-            },
+            headers=kis_headers(token, TrIdManager.get_tr_id("stock_info")),
             params=request_data
         )
-        
-        if response.status_code != 200:
-            raise Exception(f"Failed to get stock info: {response.text}")
-        
-        return response.json()
+        return response_json(response, "Failed to get stock info")
 
 @mcp.tool(
     name="inquery-stock-history",
@@ -682,7 +750,7 @@ async def inquery_stock_history(symbol: str, start_date: str, end_date: str):
     Returns:
         Dictionary containing daily stock price history
     """
-    async with httpx.AsyncClient() as client:
+    async with kis_client() as client:
         token = await get_access_token(client)
         
         # Prepare request data
@@ -697,20 +765,10 @@ async def inquery_stock_history(symbol: str, start_date: str, end_date: str):
         
         response = await client.get(
             f"{TrIdManager.get_domain('stock_history')}{STOCK_HISTORY_PATH}",
-            headers={
-                "content-type": CONTENT_TYPE,
-                "authorization": f"{AUTH_TYPE} {token}",
-                "appkey": os.environ["KIS_APP_KEY"],
-                "appsecret": os.environ["KIS_APP_SECRET"],
-                "tr_id": TrIdManager.get_tr_id("stock_history")
-            },
+            headers=kis_headers(token, TrIdManager.get_tr_id("stock_history")),
             params=request_data
         )
-        
-        if response.status_code != 200:
-            raise Exception(f"Failed to get stock history: {response.text}")
-        
-        return response.json()
+        return response_json(response, "Failed to get stock history")
 
 @mcp.tool(
     name="inquery-stock-ask",
@@ -726,7 +784,7 @@ async def inquery_stock_ask(symbol: str):
     Returns:
         Dictionary containing stock ask price information
     """
-    async with httpx.AsyncClient() as client:
+    async with kis_client() as client:
         token = await get_access_token(client)
         
         # Prepare request data
@@ -737,20 +795,10 @@ async def inquery_stock_ask(symbol: str):
         
         response = await client.get(
             f"{TrIdManager.get_domain('stock_ask')}{STOCK_ASK_PATH}",
-            headers={
-                "content-type": CONTENT_TYPE,
-                "authorization": f"{AUTH_TYPE} {token}",
-                "appkey": os.environ["KIS_APP_KEY"],
-                "appsecret": os.environ["KIS_APP_SECRET"],
-                "tr_id": TrIdManager.get_tr_id("stock_ask")
-            },
+            headers=kis_headers(token, TrIdManager.get_tr_id("stock_ask")),
             params=request_data
         )
-        
-        if response.status_code != 200:
-            raise Exception(f"Failed to get stock ask: {response.text}")
-        
-        return response.json()
+        return response_json(response, "Failed to get stock ask")
 
 @mcp.tool(
     name="order-overseas-stock",
@@ -780,7 +828,7 @@ async def order_overseas_stock(symbol: str, quantity: int, price: float, order_t
     if market not in MARKET_CODES:
         raise ValueError(f"Unsupported market: {market}. Supported markets: {', '.join(MARKET_CODES.keys())}")
 
-    async with httpx.AsyncClient() as client:
+    async with kis_client() as client:
         token = await get_access_token(client)
         
         # Get market prefix for TR_ID
@@ -807,8 +855,8 @@ async def order_overseas_stock(symbol: str, quantity: int, price: float, order_t
         
         # Prepare request data
         request_data = {
-            "CANO": os.environ["KIS_CANO"],           # 계좌번호
-            "ACNT_PRDT_CD": "01",                     # 계좌상품코드
+            "CANO": get_account_number(),           # 계좌번호
+            "ACNT_PRDT_CD": get_account_product_code(),                     # 계좌상품코드
             "OVRS_EXCG_CD": market,                   # 해외거래소코드
             "PDNO": symbol,                           # 종목코드
             "ORD_QTY": str(quantity),                 # 주문수량
@@ -819,20 +867,10 @@ async def order_overseas_stock(symbol: str, quantity: int, price: float, order_t
         
         response = await client.post(
             f"{TrIdManager.get_domain(order_type)}{OVERSEAS_ORDER_PATH}",
-            headers={
-                "content-type": CONTENT_TYPE,
-                "authorization": f"{AUTH_TYPE} {token}",
-                "appkey": os.environ["KIS_APP_KEY"],
-                "appsecret": os.environ["KIS_APP_SECRET"],
-                "tr_id": tr_id,
-            },
+            headers=kis_headers(token, tr_id),
             json=request_data
         )
-        
-        if response.status_code != 200:
-            raise Exception(f"Failed to order overseas stock: {response.text}")
-        
-        return response.json()
+        return response_json(response, "Failed to order overseas stock")
 
 @mcp.tool(
     name="inquery-overseas-stock-price",
@@ -849,29 +887,19 @@ async def inquery_overseas_stock_price(symbol: str, market: str):
     Returns:
         Dictionary containing stock price information
     """
-    async with httpx.AsyncClient() as client:
+    async with kis_client() as client:
         token = await get_access_token(client)
         
         response = await client.get(
             f"{TrIdManager.get_domain('buy')}{OVERSEAS_STOCK_PRICE_PATH}",
-            headers={
-                "content-type": CONTENT_TYPE,
-                "authorization": f"{AUTH_TYPE} {token}",
-                "appkey": os.environ["KIS_APP_KEY"],
-                "appsecret": os.environ["KIS_APP_SECRET"],
-                "tr_id": "HHDFS00000300"
-            },
+            headers=kis_headers(token, "HHDFS00000300"),
             params={
                 "AUTH": "",
                 "EXCD": market,
                 "SYMB": symbol
             }
         )
-        
-        if response.status_code != 200:
-            raise Exception(f"Failed to get overseas stock price: {response.text}")
-        
-        return response.json()
+        return response_json(response, "Failed to get overseas stock price")
 
 if __name__ == "__main__":
     main()
