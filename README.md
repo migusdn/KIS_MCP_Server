@@ -10,6 +10,7 @@
 - **API 카탈로그 기반 호출**
   - 8개 그룹, 166개 REST API 제공
   - API 그룹/ID, 경로, HTTP 메서드, TR_ID 후보, 요청 파라미터 확인
+  - 파라미터별 한글 라벨, 입력 가이드, 예시값, 주요 코드값 제공
   - 전체 목록: [`API_CATALOG.md`](API_CATALOG.md)
 - **국내주식**
   - 현재가, 기간/일별 시세, 호가, 업종지수, 기본정보 조회
@@ -113,6 +114,9 @@ MCP 클라이언트 등록 예시:
 | `get-kis-api-spec` | 단일 API의 경로, TR_ID 후보, 파라미터 확인 |
 | `call-kis-api` | `group`, `api_type`, `params`로 카탈로그 API 호출 |
 
+`list-kis-api-specs`는 필수 파라미터의 라벨, 예시값, 주요 코드값을 함께 반환합니다.
+`get-kis-api-spec`는 전체 파라미터의 `label`, `guide`, `examples`, `values`, `default`, `auto_fill` 정보를 반환하므로 LLM이 호출에 필요한 입력 형태를 바로 확인할 수 있습니다.
+
 `call-kis-api`는 다음 처리를 공통으로 수행합니다.
 
 - 환경변수 기반 계좌번호/계좌상품코드 자동 입력
@@ -213,7 +217,7 @@ MCP 클라이언트 등록 예시:
 | `elw` | ELW | 1 |
 | `etfetn` | ETF/ETN | 2 |
 
-전체 API ID, 경로, TR_ID, 필수 파라미터는 [`API_CATALOG.md`](API_CATALOG.md)에 정리되어 있습니다.
+전체 API ID, 경로, TR_ID, 필수 파라미터 가이드는 [`API_CATALOG.md`](API_CATALOG.md)에 정리되어 있습니다.
 
 ## 환경 변수
 

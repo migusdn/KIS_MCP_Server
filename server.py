@@ -776,11 +776,20 @@ async def list_kis_api_specs(group: str | None = None, query: str | None = None,
     for spec in iter_kis_api_specs():
         if group and spec["group"] != group:
             continue
+        param_text = " ".join(
+            " ".join(
+                str(param.get(key, ""))
+                for key in ["name", "wire_name", "label", "guide", "examples", "values"]
+            )
+            for param in spec.get("params", [])
+        )
         searchable = " ".join(
             str(spec.get(key, "")) for key in ["group", "api_type", "category", "name", "path"]
-        ).lower()
+        ) + " " + param_text
+        searchable = searchable.lower()
         if query_text and query_text not in searchable:
             continue
+        required_params = [p for p in spec.get("params", []) if p.get("required")]
         items.append(
             {
                 "group": spec["group"],
@@ -790,7 +799,19 @@ async def list_kis_api_specs(group: str | None = None, query: str | None = None,
                 "path": spec["path"],
                 "http_method": spec["http_method"],
                 "tr_ids": spec.get("tr_ids", []),
-                "required_params": [p["name"] for p in spec.get("params", []) if p.get("required")],
+                "required_params": [p["name"] for p in required_params],
+                "required_param_guides": [
+                    {
+                        "name": p["name"],
+                        "label": p.get("label", ""),
+                        "guide": p.get("guide", ""),
+                        "examples": p.get("examples", []),
+                        "values": p.get("values", {}),
+                        "default": p.get("default"),
+                        "auto_fill": bool(p.get("auto_fill")),
+                    }
+                    for p in required_params
+                ],
             }
         )
 

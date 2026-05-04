@@ -101,7 +101,7 @@ class KisRequestTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(catalog["total_apis"], 166)
         self.assertEqual(catalog["groups"]["domestic_stock"]["count"], 74)
         self.assertEqual(catalog["groups"]["overseas_stock"]["count"], 34)
-        self.assertIn("sample implementation code", catalog["source"]["excluded"])
+        self.assertNotIn("source", catalog)
 
     async def test_get_api_spec_returns_interface_metadata_only(self):
         spec = await server.get_kis_api_spec("domestic_stock", "inquire_price")
@@ -112,6 +112,10 @@ class KisRequestTests(unittest.IsolatedAsyncioTestCase):
             [param["wire_name"] for param in spec["params"]],
             ["FID_COND_MRKT_DIV_CODE", "FID_INPUT_ISCD"],
         )
+        params_by_name = {param["name"]: param for param in spec["params"]}
+        self.assertEqual(params_by_name["fid_cond_mrkt_div_code"]["label"], "시장 분류 코드")
+        self.assertIn("J", params_by_name["fid_cond_mrkt_div_code"]["values"])
+        self.assertIn("005930", params_by_name["fid_input_iscd"]["examples"])
         self.assertNotIn("description", json.dumps(spec, ensure_ascii=False).lower())
 
     async def test_overseas_balance_spec_includes_continuation_keys_from_examples(self):
@@ -123,6 +127,17 @@ class KisRequestTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(params_by_wire["CTX_AREA_NK200"]["default"], "")
         self.assertFalse(params_by_wire["CTX_AREA_FK200"]["required"])
         self.assertFalse(params_by_wire["CTX_AREA_NK200"]["required"])
+        self.assertEqual(params_by_wire["OVRS_EXCG_CD"]["label"], "해외거래소 코드")
+        self.assertIn("NASD", params_by_wire["OVRS_EXCG_CD"]["values"])
+        self.assertIn("USD", params_by_wire["TR_CRCY_CD"]["examples"])
+
+    async def test_api_list_searches_parameter_guides(self):
+        result = await server.list_kis_api_specs(group="overseas_stock", query="나스닥", limit=10)
+
+        self.assertGreater(result["matched"], 0)
+        first = result["items"][0]
+        self.assertIn("required_param_guides", first)
+        self.assertIn("guide", first["required_param_guides"][0])
 
     async def test_generic_call_maps_lowercase_params_to_wire_keys(self):
         env = {
