@@ -157,6 +157,8 @@ ORDER_DETAIL_PATH = "/uapi/domestic-stock/v1/trading/inquire-ccnl"  # 주문체�
 STOCK_INFO_PATH = "/uapi/domestic-stock/v1/quotations/inquire-daily-price"  # 일별주가조회
 STOCK_HISTORY_PATH = "/uapi/domestic-stock/v1/quotations/inquire-daily-itemchartprice"  # 주식일별주가조회
 STOCK_ASK_PATH = "/uapi/domestic-stock/v1/quotations/inquire-asking-price-exp-ccn"  # 주식호가조회
+INDEX_PRICE_PATH = "/uapi/domestic-stock/v1/quotations/inquire-index-price"  # 국내업종 현재지수
+STOCK_BASIC_INFO_PATH = "/uapi/domestic-stock/v1/quotations/search-stock-info"  # 주식기본조회
 
 # 해외주식 API 경로
 OVERSEAS_STOCK_PRICE_PATH = "/uapi/overseas-price/v1/quotations/price"
@@ -196,6 +198,8 @@ class TrIdManager:
         "stock_info": "FHKST01010400",  # 일별주가조회
         "stock_history": "FHKST03010200",  # 주식일별주가조회
         "stock_ask": "FHKST01010200",  # 주식호가조회
+        "index_price": "FHPUP02100000",  # 국내업종 현재지수
+        "stock_basic_info": "CTPF1002R",  # 주식기본조회
         
         # 해외주식
         "us_buy": "TTTT1002U",      # 미국 매수 주문
@@ -224,6 +228,8 @@ class TrIdManager:
         "stock_info": "FHKST01010400",  # 일별주가조회
         "stock_history": "FHKST03010200",  # 주식일별주가조회
         "stock_ask": "FHKST01010200",  # 주식호가조회
+        "index_price": "FHPUP02100000",  # 국내업종 현재지수
+        "stock_basic_info": "CTPF1002R",  # 주식기본조회
         
         # 해외주식
         "us_buy": "VTTT1002U",      # 미국 매수 주문
@@ -273,7 +279,7 @@ class TrIdManager:
             return DOMAIN if is_real_account else VIRTUAL_DOMAIN
             
         # 조회 API는 실전/모의 동일한 도메인 사용
-        if operation in ["price", "stock_info", "stock_history", "stock_ask"]:
+        if operation in ["price", "stock_info", "stock_history", "stock_ask", "index_price", "stock_basic_info"]:
             return DOMAIN
             
         # 거래 API는 계좌 타입에 따라 다른 도메인 사용
@@ -799,6 +805,73 @@ async def inquery_stock_ask(symbol: str):
             params=request_data
         )
         return response_json(response, "Failed to get stock ask")
+
+
+@mcp.tool(
+    name="inquery-stock-market",
+    description="Get Korean stock market index price from Korea Investment & Securities",
+)
+async def inquery_stock_market(index_code: str = "0001", market_div_code: str = "U"):
+    """
+    Get Korean stock market index price.
+
+    Args:
+        index_code: 업종/지수 코드. 예: 코스피 "0001", 코스닥 "1001", 코스피200 "2001"
+        market_div_code: 시장 분류 코드. 국내업종 현재지수는 보통 "U"를 사용
+
+    Returns:
+        Dictionary containing current index information
+    """
+    if not index_code:
+        raise ValueError("index_code is required. e.g. '0001' for KOSPI")
+    if not market_div_code:
+        raise ValueError("market_div_code is required. e.g. 'U'")
+
+    async with kis_client() as client:
+        token = await get_access_token(client)
+        response = await client.get(
+            f"{TrIdManager.get_domain('index_price')}{INDEX_PRICE_PATH}",
+            headers=kis_headers(token, TrIdManager.get_tr_id("index_price")),
+            params={
+                "FID_COND_MRKT_DIV_CODE": market_div_code,
+                "FID_INPUT_ISCD": index_code,
+            },
+        )
+        return response_json(response, "Failed to get stock market index")
+
+
+@mcp.tool(
+    name="inquery-stock-basic-info",
+    description="Get basic domestic stock product information from Korea Investment & Securities",
+)
+async def inquery_stock_basic_info(symbol: str, product_type: str = "300"):
+    """
+    Get basic domestic stock information.
+
+    Args:
+        symbol: 종목코드 6자리. 예: 삼성전자 "005930"
+        product_type: 상품유형코드. 주식/ETF/ETN/ELW는 "300"
+
+    Returns:
+        Dictionary containing basic stock/product metadata
+    """
+    if not symbol:
+        raise ValueError("symbol is required. e.g. '005930'")
+    if not product_type:
+        raise ValueError("product_type is required. e.g. '300'")
+
+    async with kis_client() as client:
+        token = await get_access_token(client)
+        response = await client.get(
+            f"{TrIdManager.get_domain('stock_basic_info')}{STOCK_BASIC_INFO_PATH}",
+            headers=kis_headers(token, TrIdManager.get_tr_id("stock_basic_info")),
+            params={
+                "PRDT_TYPE_CD": product_type,
+                "PDNO": symbol,
+            },
+        )
+        return response_json(response, "Failed to get stock basic info")
+
 
 @mcp.tool(
     name="order-overseas-stock",

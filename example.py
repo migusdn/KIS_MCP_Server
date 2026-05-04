@@ -11,13 +11,14 @@ from server import (
     inquery_stock_history,
     inquery_stock_ask,
     inquery_stock_market,
+    inquery_stock_basic_info,
     order_overseas_stock,
     inquery_overseas_stock_price
 )
 
 async def test_domestic_stock(symbol: str, name: str):
     """Test domestic stock price inquiry
-    
+
     Args:
         symbol: Stock symbol (e.g. "005930")
         name: Stock name (e.g. "Samsung Electronics")
@@ -150,10 +151,19 @@ async def test_stock_market():
     except Exception as e:
         print(f"Error testing stock market: {e}")
 
+async def test_stock_basic_info():
+    """Test stock basic information inquiry"""
+    try:
+        result = await inquery_stock_basic_info("005930")
+        print("\nStock Basic Info Response:")
+        print(json.dumps(result, indent=2, ensure_ascii=False))
+    except Exception as e:
+        print(f"Error testing stock basic info: {e}")
+
 async def main():
     """Run all tests"""
     print("Starting KIS MCP Server tests...")
-    
+
     # Domestic stock tests
     await test_domestic_stock("005930", "Samsung Electronics")
     await test_balance()
@@ -164,12 +174,13 @@ async def main():
     await test_stock_history()
     await test_stock_ask()
     await test_stock_market()
-    
+    await test_stock_basic_info()
+
     # Overseas stock tests
     await test_overseas_order()
-    
+
     print("\nAll tests completed!")
 
 if __name__ == "__main__":
-    asyncio.run(main()) 
-    
+    asyncio.run(main())
+

@@ -93,6 +93,44 @@ class KisRequestTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(client.calls[0]["params"]["ACNT_PRDT_CD"], "22")
         self.assertEqual(client.calls[0]["headers"]["tr_id"], "VTTC8434R")
 
+    async def test_stock_market_uses_official_index_endpoint(self):
+        env = {
+            "KIS_APP_KEY": "app",
+            "KIS_APP_SECRET": "secret",
+            "KIS_ACCOUNT_TYPE": "REAL",
+        }
+        client = StubClient(StubResponse({"output": [{"bstp_nmix_prpr": "3000.00"}]}))
+
+        with patch.dict(os.environ, env, clear=True), \
+             patch.object(server, "get_http_client", AsyncMock(return_value=client)), \
+             patch.object(server, "get_access_token", AsyncMock(return_value="token")):
+            result = await server.inquery_stock_market(index_code="0001")
+
+        self.assertEqual(result["output"][0]["bstp_nmix_prpr"], "3000.00")
+        self.assertTrue(client.calls[0]["url"].endswith(server.INDEX_PRICE_PATH))
+        self.assertEqual(client.calls[0]["params"]["FID_COND_MRKT_DIV_CODE"], "U")
+        self.assertEqual(client.calls[0]["params"]["FID_INPUT_ISCD"], "0001")
+        self.assertEqual(client.calls[0]["headers"]["tr_id"], "FHPUP02100000")
+
+    async def test_stock_basic_info_uses_official_search_endpoint(self):
+        env = {
+            "KIS_APP_KEY": "app",
+            "KIS_APP_SECRET": "secret",
+            "KIS_ACCOUNT_TYPE": "REAL",
+        }
+        client = StubClient(StubResponse({"output": [{"prdt_abrv_name": "삼성전자"}]}))
+
+        with patch.dict(os.environ, env, clear=True), \
+             patch.object(server, "get_http_client", AsyncMock(return_value=client)), \
+             patch.object(server, "get_access_token", AsyncMock(return_value="token")):
+            result = await server.inquery_stock_basic_info("005930")
+
+        self.assertEqual(result["output"][0]["prdt_abrv_name"], "삼성전자")
+        self.assertTrue(client.calls[0]["url"].endswith(server.STOCK_BASIC_INFO_PATH))
+        self.assertEqual(client.calls[0]["params"]["PRDT_TYPE_CD"], "300")
+        self.assertEqual(client.calls[0]["params"]["PDNO"], "005930")
+        self.assertEqual(client.calls[0]["headers"]["tr_id"], "CTPF1002R")
+
     async def test_access_token_saves_app_scoped_cache(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             token_file = Path(tmpdir) / "token.json"
