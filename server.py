@@ -767,14 +767,32 @@ def _default_param_value(name: str, wire_name: str) -> tuple[bool, Any]:
     return False, None
 
 
+def _coerce_params_argument(params: dict[str, Any] | str | None) -> dict[str, Any]:
+    """일부 MCP 클라이언트는 params 객체를 JSON 문자열로 직렬화해 보내므로 파싱 fallback을 둔다."""
+    if params is None:
+        return {}
+    if isinstance(params, dict):
+        return params
+    if isinstance(params, str):
+        text = params.strip()
+        if not text:
+            return {}
+        try:
+            parsed = json.loads(text)
+        except json.JSONDecodeError as e:
+            raise ValueError(f"params must be a JSON object/dict, got unparseable string: {e}") from e
+        if not isinstance(parsed, dict):
+            raise ValueError("params must be a JSON object/dict")
+        return parsed
+    raise ValueError("params must be an object/dict")
+
+
 def _prepare_api_payload(
     spec: dict[str, Any],
-    params: dict[str, Any] | None,
+    params: dict[str, Any] | str | None,
     allow_extra_params: bool = False,
 ) -> dict[str, Any]:
-    input_params = params or {}
-    if not isinstance(input_params, dict):
-        raise ValueError("params must be an object/dict")
+    input_params = _coerce_params_argument(params)
 
     payload: dict[str, Any] = {}
     consumed: set[str] = set()
@@ -890,7 +908,7 @@ async def get_kis_api_spec(group: str, api_type: str):
 async def call_kis_api(
     group: str,
     api_type: str,
-    params: dict[str, Any] | None = None,
+    params: dict[str, Any] | str | None = None,
     tr_id: str | None = None,
     tr_cont: str = "",
     env_dv: str | None = None,
