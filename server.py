@@ -245,6 +245,10 @@ MARKET_CODES = {
     "VNSE": "베트남 호치민"
 }
 
+# US exchanges, where the KIS overseas order API defines extra ORD_DVSN codes
+# (buy: 32 LOO / 34 LOC, sell: 31 MOO / 33 MOC) but no plain market order type.
+US_MARKET_CODES = {"NASD", "NYSE", "AMEX"}
+
 OVERSEAS_QUOTE_EXCHANGE_CODES = {
     "NASD": "NAS",
     "NYSE": "NYS",
@@ -1434,9 +1438,13 @@ async def order_overseas_stock(
     Args:
         symbol: Stock symbol (e.g. "AAPL")
         quantity: Order quantity
-        price: Order price (0 for market price)
+        price: Limit price per share (must be > 0 — the KIS overseas order API has no
+            plain market order type; see order_division for the supported alternatives)
         order_type: Order type ("buy" or "sell", case-insensitive)
         market: Market code ("NASD" for NASDAQ, "NYSE" for NYSE, etc.)
+        order_division: Optional explicit ORD_DVSN code. Defaults to "00" (limit).
+            US buy also allows "32" (LOO) / "34" (LOC); US sell also allows
+            "31" (MOO) / "33" (MOC) with price 0. Paper trading allows "00" only.
         
     Returns:
         Dictionary containing order information
@@ -1451,6 +1459,26 @@ async def order_overseas_stock(
     if market not in MARKET_CODES:
         raise ValueError(f"Unsupported market: {market}. Supported markets: {', '.join(MARKET_CODES.keys())}")
 
+    # The KIS overseas order API has no plain market order type ("01"), so the old
+    # fallback was rejected by KIS for every overseas exchange. Per the official spec
+    # (koreainvestment/open-trading-api), US buy (TTTT1002U) accepts ORD_DVSN 00 (limit) /
+    # 32 (LOO) / 34 (LOC), US sell (TTTT1006U) additionally 31 (MOO) / 33 (MOC), and
+    # paper trading as well as the non-US exchanges accept limit ("00") only.
+    if not order_division:
+        if price <= 0:
+            if market in US_MARKET_CODES:
+                raise ValueError(
+                    f"Plain market orders are not supported for US exchanges ({market}): "
+                    "KIS accepts ORD_DVSN 00 (limit) / 32 (LOO) / 34 (LOC) for buys, plus "
+                    "31 (MOO) / 33 (MOC) for sells. Pass a positive limit price, or set "
+                    "order_division explicitly (e.g. '31'/'33' for a US sell market-on-open/close order)."
+                )
+            raise ValueError(
+                f"Plain market orders are not supported for overseas exchange {market}: "
+                "the KIS overseas order API accepts limit orders only. Pass a positive limit price."
+            )
+        order_division = "00"
+
     return await call_kis_api(
         "overseas_stock",
         "order",
@@ -1458,7 +1486,7 @@ async def order_overseas_stock(
             "ctac_tlno": contact_phone,
             "mgco_aptm_odno": mgco_aptm_odno,
             "ord_dv": order_type,
-            "ord_dvsn": order_division or ("00" if price > 0 else "01"),
+            "ord_dvsn": order_division,
             "ord_qty": str(quantity),
             "ord_svr_dvsn_cd": order_server_division,
             "ovrs_excg_cd": market,
