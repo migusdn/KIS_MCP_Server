@@ -624,6 +624,27 @@ class KisRequestTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(client.calls, [])
 
+    async def test_legacy_overseas_order_rejects_non_finite_price(self):
+        env = {
+            "KIS_APP_KEY": "app",
+            "KIS_APP_SECRET": "secret",
+            "KIS_ACCOUNT_TYPE": "REAL",
+            "KIS_CANO": "12345678",
+            "KIS_ACNT_PRDT_CD": "01",
+            "KIS_ENABLE_TRADING": "true",
+        }
+        client = StubClient(StubResponse({"rt_cd": "0"}))
+
+        with patch.dict(os.environ, env, clear=True), \
+             patch.object(server, "get_http_client", AsyncMock(return_value=client)), \
+             patch.object(server, "get_access_token", AsyncMock(return_value="token")), \
+             patch.object(server, "get_hashkey", AsyncMock(return_value="hash")):
+            for price in [float("nan"), float("inf")]:
+                with self.subTest(price=price), self.assertRaisesRegex(ValueError, "finite numeric value"):
+                    await server.order_overseas_stock("AAPL", 1, price, "buy", "NASD")
+
+        self.assertEqual(client.calls, [])
+
     async def test_generic_overseas_order_rejects_plain_market_division_before_network(self):
         env = {
             "KIS_APP_KEY": "app",
@@ -655,6 +676,41 @@ class KisRequestTests(unittest.IsolatedAsyncioTestCase):
                         "pdno": "AAPL",
                     },
                 )
+
+        self.assertEqual(client.calls, [])
+
+    async def test_generic_overseas_order_rejects_non_finite_price_before_network(self):
+        env = {
+            "KIS_APP_KEY": "app",
+            "KIS_APP_SECRET": "secret",
+            "KIS_ACCOUNT_TYPE": "REAL",
+            "KIS_CANO": "12345678",
+            "KIS_ACNT_PRDT_CD": "01",
+            "KIS_ENABLE_TRADING": "true",
+        }
+        client = StubClient(StubResponse({"rt_cd": "0"}))
+
+        with patch.dict(os.environ, env, clear=True), \
+             patch.object(server, "get_http_client", AsyncMock(return_value=client)), \
+             patch.object(server, "get_access_token", AsyncMock(return_value="token")), \
+             patch.object(server, "get_hashkey", AsyncMock(return_value="hash")):
+            for price in ["NaN", "Infinity"]:
+                with self.subTest(price=price), self.assertRaisesRegex(ValueError, "finite numeric value"):
+                    await server.call_kis_api(
+                        "overseas_stock",
+                        "order",
+                        {
+                            "ctac_tlno": "",
+                            "mgco_aptm_odno": "",
+                            "ord_dv": "buy",
+                            "ord_dvsn": "00",
+                            "ord_qty": "1",
+                            "ord_svr_dvsn_cd": "0",
+                            "ovrs_excg_cd": "NASD",
+                            "ovrs_ord_unpr": price,
+                            "pdno": "AAPL",
+                        },
+                    )
 
         self.assertEqual(client.calls, [])
 

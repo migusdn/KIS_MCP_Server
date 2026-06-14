@@ -2,6 +2,7 @@ import argparse
 from dataclasses import dataclass
 import json
 import logging
+import math
 import os
 from pathlib import Path
 import sys
@@ -594,6 +595,8 @@ def _validate_overseas_order_division(
     """Validate and normalize ORD_DVSN before sending a regular overseas-stock order."""
 
     normalized = order_division.strip().upper()
+    if not math.isfinite(price):
+        raise ValueError("price must be a finite numeric value for overseas stock orders")
     if price < 0:
         raise ValueError("price must be non-negative for overseas stock orders")
 
