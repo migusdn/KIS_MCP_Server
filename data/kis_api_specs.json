@@ -14282,7 +14282,82 @@
                 "34": "LOC(장마감지정가, 실전 미국)",
                 "50": "단주지정가(실전 홍콩 매도)"
               },
-              "wire_name": "ORD_DVSN"
+              "wire_name": "ORD_DVSN",
+              "conditional_values": [
+                {
+                  "when": {
+                    "env": "REAL",
+                    "ovrs_excg_cd": [
+                      "NASD",
+                      "NYSE",
+                      "AMEX"
+                    ],
+                    "ord_dv": "buy"
+                  },
+                  "values": {
+                    "00": "지정가",
+                    "32": "LOO(장개시지정가)",
+                    "34": "LOC(장마감지정가)"
+                  },
+                  "price_rule": "00/32/34는 양수 주문단가가 필요합니다."
+                },
+                {
+                  "when": {
+                    "env": "REAL",
+                    "ovrs_excg_cd": [
+                      "NASD",
+                      "NYSE",
+                      "AMEX"
+                    ],
+                    "ord_dv": "sell"
+                  },
+                  "values": {
+                    "00": "지정가",
+                    "31": "MOO(장개시시장가)",
+                    "32": "LOO(장개시지정가)",
+                    "33": "MOC(장마감시장가)",
+                    "34": "LOC(장마감지정가)"
+                  },
+                  "price_rule": "31/33은 주문단가 0, 00/32/34는 양수 주문단가가 필요합니다."
+                },
+                {
+                  "when": {
+                    "env": "REAL",
+                    "ovrs_excg_cd": "SEHK",
+                    "ord_dv": "sell"
+                  },
+                  "values": {
+                    "00": "지정가",
+                    "50": "단주지정가"
+                  },
+                  "price_rule": "00/50은 양수 주문단가가 필요합니다."
+                },
+                {
+                  "when": {
+                    "env": "VIRTUAL"
+                  },
+                  "values": {
+                    "00": "지정가"
+                  },
+                  "price_rule": "모의투자는 00 지정가와 양수 주문단가만 지원합니다."
+                },
+                {
+                  "when": {
+                    "env": "REAL",
+                    "ovrs_excg_cd": [
+                      "SHAA",
+                      "SZAA",
+                      "TKSE",
+                      "HASE",
+                      "VNSE"
+                    ]
+                  },
+                  "values": {
+                    "00": "지정가"
+                  },
+                  "price_rule": "00은 양수 주문단가가 필요합니다."
+                }
+              ]
             },
             {
               "default": null,

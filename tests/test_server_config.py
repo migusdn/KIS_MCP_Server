@@ -802,11 +802,36 @@ class KisRequestTests(unittest.IsolatedAsyncioTestCase):
     async def test_overseas_order_spec_documents_supported_divisions(self):
         spec = await server.get_kis_api_spec("overseas_stock", "order")
         ord_dvsn = next(param for param in spec["params"] if param["name"] == "ord_dvsn")
+        runtime_codes = set().union(
+            server.US_REAL_BUY_ORDER_DIVISIONS,
+            server.US_REAL_SELL_ORDER_DIVISIONS,
+            server.HK_REAL_SELL_ORDER_DIVISIONS,
+            server.VIRTUAL_OVERSEAS_ORDER_DIVISIONS,
+        )
+        conditional_codes = {
+            code
+            for condition in ord_dvsn["conditional_values"]
+            for code in condition["values"]
+        }
 
         self.assertNotIn("01", ord_dvsn["values"])
-        self.assertIn("31", ord_dvsn["values"])
-        self.assertIn("50", ord_dvsn["values"])
+        self.assertEqual(set(ord_dvsn["values"]), runtime_codes)
+        self.assertEqual(conditional_codes, runtime_codes)
         self.assertIn("일반 시장가(01)는 지원하지 않습니다", ord_dvsn["guide"])
+        self.assertTrue(
+            any(condition["when"].get("env") == "VIRTUAL" for condition in ord_dvsn["conditional_values"])
+        )
+
+    async def test_api_list_includes_conditional_param_guides(self):
+        result = await server.list_kis_api_specs(group="overseas_stock", query="해외주식 주문", limit=50)
+        order_item = next(item for item in result["items"] if item["api_type"] == "order")
+        ord_dvsn = next(
+            param for param in order_item["required_param_guides"]
+            if param["name"] == "ord_dvsn"
+        )
+
+        self.assertIn("conditional_values", ord_dvsn)
+        self.assertGreater(len(ord_dvsn["conditional_values"]), 0)
 
     async def test_legacy_overseas_limit_order_defaults_to_limit_division(self):
         env = {

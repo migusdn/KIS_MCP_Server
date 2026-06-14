@@ -1037,6 +1037,7 @@ async def list_kis_api_specs(group: str | None = None, query: str | None = None,
                         "guide": p.get("guide", ""),
                         "examples": p.get("examples", []),
                         "values": p.get("values", {}),
+                        "conditional_values": p.get("conditional_values", []),
                         "default": p.get("default"),
                         "auto_fill": bool(p.get("auto_fill")),
                     }
