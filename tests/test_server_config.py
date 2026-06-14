@@ -182,6 +182,58 @@ class KisRequestTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(client.calls[0]["params"]["FID_COND_MRKT_DIV_CODE"], "J")
         self.assertEqual(client.calls[0]["params"]["FID_INPUT_ISCD"], "005930")
 
+    async def test_generic_call_accepts_json_string_params(self):
+        env = {
+            "KIS_APP_KEY": "app",
+            "KIS_APP_SECRET": "secret",
+            "KIS_ACCOUNT_TYPE": "REAL",
+        }
+        client = StubClient(StubResponse({"output": {"stck_prpr": "70000"}}))
+
+        with patch.dict(os.environ, env, clear=True), \
+             patch.object(server, "get_http_client", AsyncMock(return_value=client)), \
+             patch.object(server, "get_access_token", AsyncMock(return_value="token")):
+            result = await server.call_kis_api(
+                "domestic_stock",
+                "inquire_price",
+                '{"fid_cond_mrkt_div_code": "J", "fid_input_iscd": "005930"}',
+            )
+
+        self.assertEqual(result["output"]["stck_prpr"], "70000")
+        self.assertEqual(client.calls[0]["params"]["FID_COND_MRKT_DIV_CODE"], "J")
+        self.assertEqual(client.calls[0]["params"]["FID_INPUT_ISCD"], "005930")
+
+    async def test_mcp_tool_call_accepts_json_string_params(self):
+        env = {
+            "KIS_APP_KEY": "app",
+            "KIS_APP_SECRET": "secret",
+            "KIS_ACCOUNT_TYPE": "REAL",
+        }
+        client = StubClient(StubResponse({"output": {"stck_prpr": "70000"}}))
+
+        with patch.dict(os.environ, env, clear=True), \
+             patch.object(server, "get_http_client", AsyncMock(return_value=client)), \
+             patch.object(server, "get_access_token", AsyncMock(return_value="token")):
+            result = await server.mcp.call_tool(
+                "call-kis-api",
+                {
+                    "group": "domestic_stock",
+                    "api_type": "inquire_price",
+                    "params": '{"fid_cond_mrkt_div_code": "J", "fid_input_iscd": "005930"}',
+                },
+            )
+
+        self.assertEqual(result.structured_content["output"]["stck_prpr"], "70000")
+        self.assertEqual(client.calls[0]["params"]["FID_COND_MRKT_DIV_CODE"], "J")
+        self.assertEqual(client.calls[0]["params"]["FID_INPUT_ISCD"], "005930")
+
+    async def test_generic_call_rejects_non_object_string_params(self):
+        with self.assertRaisesRegex(ValueError, "params must be a JSON object"):
+            await server.call_kis_api("domestic_stock", "inquire_price", '["not", "a", "dict"]')
+
+        with self.assertRaisesRegex(ValueError, "unparseable string"):
+            await server.call_kis_api("domestic_stock", "inquire_price", "{broken json")
+
     async def test_generic_call_rejects_unknown_params_by_default(self):
         with self.assertRaisesRegex(ValueError, "Unknown params"):
             await server.call_kis_api(
