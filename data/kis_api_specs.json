@@ -14324,6 +14324,17 @@
                   "when": {
                     "env": "REAL",
                     "ovrs_excg_cd": "SEHK",
+                    "ord_dv": "buy"
+                  },
+                  "values": {
+                    "00": "지정가"
+                  },
+                  "price_rule": "00은 양수 주문단가가 필요합니다."
+                },
+                {
+                  "when": {
+                    "env": "REAL",
+                    "ovrs_excg_cd": "SEHK",
                     "ord_dv": "sell"
                   },
                   "values": {

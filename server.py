@@ -684,8 +684,15 @@ def _validate_overseas_order_payload(
     order_type = _norm_side(_norm_lookup(payload, "ORD_DV"))
     market = _norm_lookup(payload, "OVRS_EXCG_CD").strip().upper()
     order_division = _norm_lookup(payload, "ORD_DVSN").strip().upper()
-    if order_type not in {"buy", "sell"} or market not in MARKET_CODES or not order_division:
-        return
+    if order_type not in {"buy", "sell"}:
+        raise ValueError('ORD_DV must be either "buy" or "sell" for overseas stock orders')
+    if market not in MARKET_CODES:
+        raise ValueError(
+            f"Unsupported OVRS_EXCG_CD for overseas stock orders: {market}. "
+            f"Supported markets: {', '.join(MARKET_CODES.keys())}"
+        )
+    if not order_division:
+        raise ValueError("ORD_DVSN is required for overseas stock orders")
 
     try:
         price = float(_norm_lookup(payload, "OVRS_ORD_UNPR"))
@@ -1077,6 +1084,7 @@ async def call_kis_api(
 ):
     spec = get_kis_api_spec_record(group, api_type)
     payload = _prepare_api_payload(spec, params, allow_extra_params=allow_extra_params)
+    _validate_api_payload(spec, payload, env_dv)
     selected_tr_id = _select_tr_id(spec, tr_id=tr_id, env_dv=env_dv, payload=payload)
     _validate_api_payload(spec, payload, env_dv, selected_tr_id)
     _ensure_trading_enabled(spec)

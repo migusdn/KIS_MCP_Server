@@ -679,6 +679,44 @@ class KisRequestTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(client.calls, [])
 
+    async def test_generic_overseas_order_rejects_malformed_required_fields_before_network(self):
+        env = {
+            "KIS_APP_KEY": "app",
+            "KIS_APP_SECRET": "secret",
+            "KIS_ACCOUNT_TYPE": "REAL",
+            "KIS_CANO": "12345678",
+            "KIS_ACNT_PRDT_CD": "01",
+            "KIS_ENABLE_TRADING": "true",
+        }
+        base_params = {
+            "ctac_tlno": "",
+            "mgco_aptm_odno": "",
+            "ord_dv": "buy",
+            "ord_dvsn": "00",
+            "ord_qty": "1",
+            "ord_svr_dvsn_cd": "0",
+            "ovrs_excg_cd": "NASD",
+            "ovrs_ord_unpr": "100",
+            "pdno": "AAPL",
+        }
+        cases = [
+            ("ord_dv", "hold", "ORD_DV"),
+            ("ovrs_excg_cd", "XXXX", "Unsupported OVRS_EXCG_CD"),
+            ("ord_dvsn", "", "ORD_DVSN is required"),
+        ]
+
+        for key, value, pattern in cases:
+            client = StubClient(StubResponse({"rt_cd": "0"}))
+            params = {**base_params, key: value}
+            with self.subTest(key=key), \
+                 patch.dict(os.environ, env, clear=True), \
+                 patch.object(server, "get_http_client", AsyncMock(return_value=client)), \
+                 patch.object(server, "get_access_token", AsyncMock(return_value="token")), \
+                 patch.object(server, "get_hashkey", AsyncMock(return_value="hash")):
+                with self.assertRaisesRegex(ValueError, pattern):
+                    await server.call_kis_api("overseas_stock", "order", params)
+                self.assertEqual(client.calls, [])
+
     async def test_generic_overseas_order_rejects_explicit_tr_id_mismatch_before_network(self):
         env = {
             "KIS_APP_KEY": "app",
@@ -821,6 +859,37 @@ class KisRequestTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(
             any(condition["when"].get("env") == "VIRTUAL" for condition in ord_dvsn["conditional_values"])
         )
+
+    async def test_overseas_order_conditional_metadata_matches_runtime_matrix(self):
+        spec = await server.get_kis_api_spec("overseas_stock", "order")
+        ord_dvsn = next(param for param in spec["params"] if param["name"] == "ord_dvsn")
+
+        def _matches(value, expected):
+            if value is None:
+                return True
+            if isinstance(value, list):
+                return expected in value
+            return value == expected
+
+        def _catalog_codes(env, market, side):
+            codes = set()
+            for condition in ord_dvsn["conditional_values"]:
+                when = condition["when"]
+                if not _matches(when.get("env"), env):
+                    continue
+                if not _matches(when.get("ovrs_excg_cd"), market):
+                    continue
+                if not _matches(when.get("ord_dv"), side):
+                    continue
+                codes.update(condition["values"])
+            return codes
+
+        for env in ["REAL", "VIRTUAL"]:
+            for market in server.MARKET_CODES:
+                for side in ["buy", "sell"]:
+                    with self.subTest(env=env, market=market, side=side):
+                        expected = set(server._allowed_overseas_order_divisions(side, market, env))
+                        self.assertEqual(_catalog_codes(env, market, side), expected)
 
     async def test_api_list_includes_conditional_param_guides(self):
         result = await server.list_kis_api_specs(group="overseas_stock", query="해외주식 주문", limit=50)
