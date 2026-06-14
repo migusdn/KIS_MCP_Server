@@ -1,4 +1,5 @@
 import argparse
+from collections.abc import Callable
 from dataclasses import dataclass
 import json
 import logging
@@ -269,6 +270,31 @@ VIRTUAL_OVERSEAS_ORDER_DIVISIONS = {
     "00": "limit",
 }
 ZERO_PRICE_OVERSEAS_ORDER_DIVISIONS = {"31", "33"}
+OVERSEAS_ORDER_MARKET_GROUPS = {
+    "NASD": "us",
+    "NYSE": "us",
+    "AMEX": "us",
+    "SEHK": "hk",
+    "SHAA": "sh",
+    "SZAA": "sz",
+    "TKSE": "jp",
+    "HASE": "vn",
+    "VNSE": "vn",
+}
+OVERSEAS_ORDER_TR_IDS = {
+    ("us", "buy"): "TTTT1002U",
+    ("us", "sell"): "TTTT1006U",
+    ("hk", "buy"): "TTTS1002U",
+    ("hk", "sell"): "TTTS1001U",
+    ("sh", "buy"): "TTTS0202U",
+    ("sh", "sell"): "TTTS1005U",
+    ("sz", "buy"): "TTTS0305U",
+    ("sz", "sell"): "TTTS0304U",
+    ("jp", "buy"): "TTTS0308U",
+    ("jp", "sell"): "TTTS0307U",
+    ("vn", "buy"): "TTTS0311U",
+    ("vn", "sell"): "TTTS0310U",
+}
 
 OVERSEAS_QUOTE_EXCHANGE_CODES = {
     "NASD": "NAS",
@@ -648,7 +674,11 @@ def _normalize_overseas_order_division(
     return _validate_overseas_order_division(order_type, market, price, "00", env_dv)
 
 
-def _validate_overseas_order_payload(payload: dict[str, Any], env_dv: str | None = None) -> None:
+def _validate_overseas_order_payload(
+    payload: dict[str, Any],
+    env_dv: str | None = None,
+    selected_tr_id: str | None = None,
+) -> None:
     """Validate catalog/generic overseas-stock order payloads before a network call."""
 
     order_type = _norm_side(_norm_lookup(payload, "ORD_DV"))
@@ -663,12 +693,43 @@ def _validate_overseas_order_payload(payload: dict[str, Any], env_dv: str | None
         raise ValueError("OVRS_ORD_UNPR must be numeric for overseas stock orders") from exc
 
     _validate_overseas_order_division(order_type, market, price, order_division, env_dv)
+    expected_tr_id = _expected_overseas_stock_order_tr_id(order_type, market, env_dv)
+    if selected_tr_id and expected_tr_id and selected_tr_id != expected_tr_id:
+        raise ValueError(
+            f"TR_ID {selected_tr_id!r} does not match overseas stock {order_type} order "
+            f"on {market}; expected {expected_tr_id!r}"
+        )
 
 
 def _virtualize_tr_id(tr_id: str, env_dv: str | None = None) -> str:
     if _env_is_virtual(env_dv) and tr_id and tr_id[0] in {"T", "J", "C"}:
         return "V" + tr_id[1:]
     return tr_id
+
+
+def _expected_overseas_stock_order_tr_id(order_type: str, market: str, env_dv: str | None = None) -> str | None:
+    market_group = OVERSEAS_ORDER_MARKET_GROUPS.get(market)
+    selected = OVERSEAS_ORDER_TR_IDS.get((market_group, order_type))
+    if selected:
+        return _virtualize_tr_id(selected, env_dv)
+    return None
+
+
+PayloadValidator = Callable[[dict[str, Any], str | None, str | None], None]
+PAYLOAD_VALIDATORS: dict[tuple[str, str], PayloadValidator] = {
+    ("overseas_stock", "order"): _validate_overseas_order_payload,
+}
+
+
+def _validate_api_payload(
+    spec: dict[str, Any],
+    payload: dict[str, Any],
+    env_dv: str | None = None,
+    selected_tr_id: str | None = None,
+) -> None:
+    validator = PAYLOAD_VALIDATORS.get((spec["group"], spec["api_type"]))
+    if validator:
+        validator(payload, env_dv, selected_tr_id)
 
 
 def _env_flag_enabled(name: str) -> bool:
@@ -778,34 +839,7 @@ def _infer_tr_id_from_payload(spec: dict[str, Any], payload: dict[str, Any], env
     if key == ("overseas_stock", "order"):
         side = _norm_side(_norm_lookup(payload, "ORD_DV"))
         market = _norm_lookup(payload, "OVRS_EXCG_CD").strip().upper()
-        market_group = {
-            "NASD": "us",
-            "NYSE": "us",
-            "AMEX": "us",
-            "SEHK": "hk",
-            "SHAA": "sh",
-            "SZAA": "sz",
-            "TKSE": "jp",
-            "HASE": "vn",
-            "VNSE": "vn",
-        }.get(market)
-        mapping = {
-            ("us", "buy"): "TTTT1002U",
-            ("us", "sell"): "TTTT1006U",
-            ("hk", "buy"): "TTTS1002U",
-            ("hk", "sell"): "TTTS1001U",
-            ("sh", "buy"): "TTTS0202U",
-            ("sh", "sell"): "TTTS1005U",
-            ("sz", "buy"): "TTTS0305U",
-            ("sz", "sell"): "TTTS0304U",
-            ("jp", "buy"): "TTTS0308U",
-            ("jp", "sell"): "TTTS0307U",
-            ("vn", "buy"): "TTTS0311U",
-            ("vn", "sell"): "TTTS0310U",
-        }
-        selected = mapping.get((market_group, side))
-        if selected:
-            return _virtualize_tr_id(selected, env_dv)
+        return _expected_overseas_stock_order_tr_id(side, market, env_dv)
 
     if key == ("overseas_stock", "order_resv"):
         order_type = _norm_lookup(payload, "ORD_DV").strip()
@@ -1042,9 +1076,8 @@ async def call_kis_api(
 ):
     spec = get_kis_api_spec_record(group, api_type)
     payload = _prepare_api_payload(spec, params, allow_extra_params=allow_extra_params)
-    if (spec["group"], spec["api_type"]) == ("overseas_stock", "order"):
-        _validate_overseas_order_payload(payload, env_dv)
     selected_tr_id = _select_tr_id(spec, tr_id=tr_id, env_dv=env_dv, payload=payload)
+    _validate_api_payload(spec, payload, env_dv, selected_tr_id)
     _ensure_trading_enabled(spec)
     base_url = _select_api_domain(spec, selected_tr_id, env_dv)
     url = f"{base_url}{spec['path']}"

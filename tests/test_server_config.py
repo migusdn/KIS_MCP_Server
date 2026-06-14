@@ -679,6 +679,41 @@ class KisRequestTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(client.calls, [])
 
+    async def test_generic_overseas_order_rejects_explicit_tr_id_mismatch_before_network(self):
+        env = {
+            "KIS_APP_KEY": "app",
+            "KIS_APP_SECRET": "secret",
+            "KIS_ACCOUNT_TYPE": "REAL",
+            "KIS_CANO": "12345678",
+            "KIS_ACNT_PRDT_CD": "01",
+            "KIS_ENABLE_TRADING": "true",
+        }
+        client = StubClient(StubResponse({"rt_cd": "0"}))
+
+        with patch.dict(os.environ, env, clear=True), \
+             patch.object(server, "get_http_client", AsyncMock(return_value=client)), \
+             patch.object(server, "get_access_token", AsyncMock(return_value="token")), \
+             patch.object(server, "get_hashkey", AsyncMock(return_value="hash")):
+            with self.assertRaisesRegex(ValueError, "does not match overseas stock sell order"):
+                await server.call_kis_api(
+                    "overseas_stock",
+                    "order",
+                    {
+                        "ctac_tlno": "",
+                        "mgco_aptm_odno": "",
+                        "ord_dv": "sell",
+                        "ord_dvsn": "31",
+                        "ord_qty": "1",
+                        "ord_svr_dvsn_cd": "0",
+                        "ovrs_excg_cd": "NASD",
+                        "ovrs_ord_unpr": "0",
+                        "pdno": "AAPL",
+                    },
+                    tr_id="TTTT1002U",
+                )
+
+        self.assertEqual(client.calls, [])
+
     async def test_generic_overseas_order_rejects_non_finite_price_before_network(self):
         env = {
             "KIS_APP_KEY": "app",
@@ -713,6 +748,56 @@ class KisRequestTests(unittest.IsolatedAsyncioTestCase):
                     )
 
         self.assertEqual(client.calls, [])
+
+    async def test_generic_overseas_order_accepts_json_string_params(self):
+        env = {
+            "KIS_APP_KEY": "app",
+            "KIS_APP_SECRET": "secret",
+            "KIS_ACCOUNT_TYPE": "REAL",
+            "KIS_CANO": "12345678",
+            "KIS_ACNT_PRDT_CD": "01",
+            "KIS_ENABLE_TRADING": "true",
+        }
+        client = StubClient(StubResponse({"rt_cd": "0"}))
+
+        with patch.dict(os.environ, env, clear=True), \
+             patch.object(server, "get_http_client", AsyncMock(return_value=client)), \
+             patch.object(server, "get_access_token", AsyncMock(return_value="token")), \
+             patch.object(server, "get_hashkey", AsyncMock(return_value="hash")):
+            await server.call_kis_api(
+                "overseas_stock",
+                "order",
+                (
+                    '{"ctac_tlno": "", "mgco_aptm_odno": "", "ord_dv": "sell", '
+                    '"ord_dvsn": "31", "ord_qty": "1", "ord_svr_dvsn_cd": "0", '
+                    '"ovrs_excg_cd": "NASD", "ovrs_ord_unpr": "0", "pdno": "AAPL"}'
+                ),
+            )
+
+        self.assertEqual(client.calls[0]["json"]["ORD_DVSN"], "31")
+        self.assertEqual(client.calls[0]["headers"]["tr_id"], "TTTT1006U")
+
+    async def test_legacy_overseas_order_accepts_hong_kong_odd_lot_division(self):
+        env = {
+            "KIS_APP_KEY": "app",
+            "KIS_APP_SECRET": "secret",
+            "KIS_ACCOUNT_TYPE": "REAL",
+            "KIS_CANO": "12345678",
+            "KIS_ACNT_PRDT_CD": "01",
+            "KIS_ENABLE_TRADING": "true",
+        }
+        client = StubClient(StubResponse({"rt_cd": "0"}))
+
+        with patch.dict(os.environ, env, clear=True), \
+             patch.object(server, "get_http_client", AsyncMock(return_value=client)), \
+             patch.object(server, "get_access_token", AsyncMock(return_value="token")), \
+             patch.object(server, "get_hashkey", AsyncMock(return_value="hash")):
+            await server.order_overseas_stock(
+                "00700", 1, 50.0, "sell", "SEHK", order_division="50"
+            )
+
+        self.assertEqual(client.calls[0]["json"]["ORD_DVSN"], "50")
+        self.assertEqual(client.calls[0]["headers"]["tr_id"], "TTTS1001U")
 
     async def test_overseas_order_spec_documents_supported_divisions(self):
         spec = await server.get_kis_api_spec("overseas_stock", "order")
