@@ -248,6 +248,26 @@ MARKET_CODES = {
 # US exchanges, where the KIS overseas order API defines extra ORD_DVSN codes
 # (buy: 32 LOO / 34 LOC, sell: 31 MOO / 33 MOC) but no plain market order type.
 US_MARKET_CODES = {"NASD", "NYSE", "AMEX"}
+US_REAL_BUY_ORDER_DIVISIONS = {
+    "00": "limit",
+    "32": "LOO",
+    "34": "LOC",
+}
+US_REAL_SELL_ORDER_DIVISIONS = {
+    "00": "limit",
+    "31": "MOO",
+    "32": "LOO",
+    "33": "MOC",
+    "34": "LOC",
+}
+HK_REAL_SELL_ORDER_DIVISIONS = {
+    "00": "limit",
+    "50": "odd-lot limit",
+}
+VIRTUAL_OVERSEAS_ORDER_DIVISIONS = {
+    "00": "limit",
+}
+ZERO_PRICE_OVERSEAS_ORDER_DIVISIONS = {"31", "33"}
 
 OVERSEAS_QUOTE_EXCHANGE_CODES = {
     "NASD": "NAS",
@@ -542,6 +562,104 @@ def _norm_side(value: str) -> str:
     if normalized in {"sell", "s", "01", "1", "매도"}:
         return "sell"
     return normalized
+
+
+def _allowed_overseas_order_divisions(
+    order_type: str,
+    market: str,
+    env_dv: str | None = None,
+) -> dict[str, str]:
+    """Return supported KIS ORD_DVSN codes for the regular overseas-stock order API."""
+
+    if _env_is_virtual(env_dv):
+        return VIRTUAL_OVERSEAS_ORDER_DIVISIONS
+    if market in US_MARKET_CODES:
+        return US_REAL_BUY_ORDER_DIVISIONS if order_type == "buy" else US_REAL_SELL_ORDER_DIVISIONS
+    if market == "SEHK" and order_type == "sell":
+        return HK_REAL_SELL_ORDER_DIVISIONS
+    return {"00": "limit"}
+
+
+def _format_order_divisions(divisions: dict[str, str]) -> str:
+    return ", ".join(f"{code} ({label})" for code, label in divisions.items())
+
+
+def _validate_overseas_order_division(
+    order_type: str,
+    market: str,
+    price: float,
+    order_division: str,
+    env_dv: str | None = None,
+) -> str:
+    """Validate and normalize ORD_DVSN before sending a regular overseas-stock order."""
+
+    normalized = order_division.strip().upper()
+    if price < 0:
+        raise ValueError("price must be non-negative for overseas stock orders")
+
+    supported = _allowed_overseas_order_divisions(order_type, market, env_dv)
+    if normalized not in supported:
+        account_mode = "VIRTUAL" if _env_is_virtual(env_dv) else "REAL"
+        raise ValueError(
+            f"ORD_DVSN {normalized!r} is not supported for {account_mode} overseas "
+            f"{order_type} orders on {market}. Supported: {_format_order_divisions(supported)}"
+        )
+
+    if normalized in ZERO_PRICE_OVERSEAS_ORDER_DIVISIONS:
+        if price != 0:
+            raise ValueError(
+                f"ORD_DVSN {normalized!r} ({supported[normalized]}) requires price=0"
+            )
+        return normalized
+
+    if price <= 0:
+        raise ValueError(
+            f"ORD_DVSN {normalized!r} ({supported[normalized]}) requires a positive limit price"
+        )
+    return normalized
+
+
+def _normalize_overseas_order_division(
+    order_type: str,
+    market: str,
+    price: float,
+    order_division: str | None,
+    env_dv: str | None = None,
+) -> str:
+    normalized = (order_division or "").strip().upper()
+    if normalized:
+        return _validate_overseas_order_division(order_type, market, price, normalized, env_dv)
+
+    if price <= 0:
+        if market in US_MARKET_CODES:
+            raise ValueError(
+                f"Plain market orders are not supported for US exchanges ({market}): "
+                "KIS accepts ORD_DVSN 00 (limit) / 32 (LOO) / 34 (LOC) for real-account buys, "
+                "plus 31 (MOO) / 33 (MOC) for real-account sells. "
+                "Pass a positive limit price, or set order_division explicitly where supported."
+            )
+        raise ValueError(
+            f"Plain market orders are not supported for overseas exchange {market}: "
+            "pass a positive limit price and supported limit ORD_DVSN code."
+        )
+    return _validate_overseas_order_division(order_type, market, price, "00", env_dv)
+
+
+def _validate_overseas_order_payload(payload: dict[str, Any], env_dv: str | None = None) -> None:
+    """Validate catalog/generic overseas-stock order payloads before a network call."""
+
+    order_type = _norm_side(_norm_lookup(payload, "ORD_DV"))
+    market = _norm_lookup(payload, "OVRS_EXCG_CD").strip().upper()
+    order_division = _norm_lookup(payload, "ORD_DVSN").strip().upper()
+    if order_type not in {"buy", "sell"} or market not in MARKET_CODES or not order_division:
+        return
+
+    try:
+        price = float(_norm_lookup(payload, "OVRS_ORD_UNPR"))
+    except ValueError as exc:
+        raise ValueError("OVRS_ORD_UNPR must be numeric for overseas stock orders") from exc
+
+    _validate_overseas_order_division(order_type, market, price, order_division, env_dv)
 
 
 def _virtualize_tr_id(tr_id: str, env_dv: str | None = None) -> str:
@@ -903,6 +1021,8 @@ async def call_kis_api(
 ):
     spec = get_kis_api_spec_record(group, api_type)
     payload = _prepare_api_payload(spec, params, allow_extra_params=allow_extra_params)
+    if (spec["group"], spec["api_type"]) == ("overseas_stock", "order"):
+        _validate_overseas_order_payload(payload, env_dv)
     selected_tr_id = _select_tr_id(spec, tr_id=tr_id, env_dv=env_dv, payload=payload)
     _ensure_trading_enabled(spec)
     base_url = _select_api_domain(spec, selected_tr_id, env_dv)
@@ -1438,13 +1558,15 @@ async def order_overseas_stock(
     Args:
         symbol: Stock symbol (e.g. "AAPL")
         quantity: Order quantity
-        price: Limit price per share (must be > 0 — the KIS overseas order API has no
-            plain market order type; see order_division for the supported alternatives)
+        price: Order price per share. Must be > 0 for limit/LOO/LOC/odd-lot
+            limit orders; use 0 only for supported real-account US sell MOO/MOC orders.
         order_type: Order type ("buy" or "sell", case-insensitive)
         market: Market code ("NASD" for NASDAQ, "NYSE" for NYSE, etc.)
         order_division: Optional explicit ORD_DVSN code. Defaults to "00" (limit).
-            US buy also allows "32" (LOO) / "34" (LOC); US sell also allows
-            "31" (MOO) / "33" (MOC) with price 0. Paper trading allows "00" only.
+            Real-account US buy also allows "32" (LOO) / "34" (LOC); real-account
+            US sell also allows "31" (MOO) / "33" (MOC) with price 0 and
+            "32" (LOO) / "34" (LOC); real-account Hong Kong sell allows "50"
+            (odd-lot limit). Paper trading allows "00" only.
         
     Returns:
         Dictionary containing order information
@@ -1459,25 +1581,10 @@ async def order_overseas_stock(
     if market not in MARKET_CODES:
         raise ValueError(f"Unsupported market: {market}. Supported markets: {', '.join(MARKET_CODES.keys())}")
 
-    # The KIS overseas order API has no plain market order type ("01"), so the old
-    # fallback was rejected by KIS for every overseas exchange. Per the official spec
-    # (koreainvestment/open-trading-api), US buy (TTTT1002U) accepts ORD_DVSN 00 (limit) /
-    # 32 (LOO) / 34 (LOC), US sell (TTTT1006U) additionally 31 (MOO) / 33 (MOC), and
-    # paper trading as well as the non-US exchanges accept limit ("00") only.
-    if not order_division:
-        if price <= 0:
-            if market in US_MARKET_CODES:
-                raise ValueError(
-                    f"Plain market orders are not supported for US exchanges ({market}): "
-                    "KIS accepts ORD_DVSN 00 (limit) / 32 (LOO) / 34 (LOC) for buys, plus "
-                    "31 (MOO) / 33 (MOC) for sells. Pass a positive limit price, or set "
-                    "order_division explicitly (e.g. '31'/'33' for a US sell market-on-open/close order)."
-                )
-            raise ValueError(
-                f"Plain market orders are not supported for overseas exchange {market}: "
-                "the KIS overseas order API accepts limit orders only. Pass a positive limit price."
-            )
-        order_division = "00"
+    # The KIS overseas order API has no plain market order type ("01"), so validate the
+    # conditional ORD_DVSN matrix before any network call. The same validator is also
+    # used by the generic catalog caller for overseas_stock.order payloads.
+    order_division = _normalize_overseas_order_division(order_type, market, price, order_division)
 
     return await call_kis_api(
         "overseas_stock",

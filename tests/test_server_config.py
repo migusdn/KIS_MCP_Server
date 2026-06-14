@@ -528,6 +528,93 @@ class KisRequestTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(client.calls[0]["json"]["OVRS_ORD_UNPR"], "0")
         self.assertEqual(client.calls[0]["headers"]["tr_id"], "TTTT1006U")
 
+    async def test_legacy_overseas_order_rejects_explicit_limit_with_zero_price(self):
+        env = {
+            "KIS_APP_KEY": "app",
+            "KIS_APP_SECRET": "secret",
+            "KIS_ACCOUNT_TYPE": "REAL",
+            "KIS_CANO": "12345678",
+            "KIS_ACNT_PRDT_CD": "01",
+            "KIS_ENABLE_TRADING": "true",
+        }
+        client = StubClient(StubResponse({"rt_cd": "0"}))
+
+        with patch.dict(os.environ, env, clear=True), \
+             patch.object(server, "get_http_client", AsyncMock(return_value=client)), \
+             patch.object(server, "get_access_token", AsyncMock(return_value="token")), \
+             patch.object(server, "get_hashkey", AsyncMock(return_value="hash")):
+            with self.assertRaisesRegex(ValueError, "positive limit price"):
+                await server.order_overseas_stock(
+                    "AAPL", 1, 0, "buy", "NASD", order_division="00"
+                )
+
+        self.assertEqual(client.calls, [])
+
+    async def test_legacy_overseas_order_rejects_virtual_market_on_close_division(self):
+        env = {
+            "KIS_APP_KEY": "app",
+            "KIS_APP_SECRET": "secret",
+            "KIS_ACCOUNT_TYPE": "VIRTUAL",
+            "KIS_CANO": "12345678",
+            "KIS_ACNT_PRDT_CD": "01",
+            "KIS_ENABLE_TRADING": "true",
+        }
+        client = StubClient(StubResponse({"rt_cd": "0"}))
+
+        with patch.dict(os.environ, env, clear=True), \
+             patch.object(server, "get_http_client", AsyncMock(return_value=client)), \
+             patch.object(server, "get_access_token", AsyncMock(return_value="token")), \
+             patch.object(server, "get_hashkey", AsyncMock(return_value="hash")):
+            with self.assertRaisesRegex(ValueError, "not supported for VIRTUAL"):
+                await server.order_overseas_stock(
+                    "AAPL", 1, 0, "sell", "NASD", order_division="33"
+                )
+
+        self.assertEqual(client.calls, [])
+
+    async def test_generic_overseas_order_rejects_plain_market_division_before_network(self):
+        env = {
+            "KIS_APP_KEY": "app",
+            "KIS_APP_SECRET": "secret",
+            "KIS_ACCOUNT_TYPE": "REAL",
+            "KIS_CANO": "12345678",
+            "KIS_ACNT_PRDT_CD": "01",
+            "KIS_ENABLE_TRADING": "true",
+        }
+        client = StubClient(StubResponse({"rt_cd": "0"}))
+
+        with patch.dict(os.environ, env, clear=True), \
+             patch.object(server, "get_http_client", AsyncMock(return_value=client)), \
+             patch.object(server, "get_access_token", AsyncMock(return_value="token")), \
+             patch.object(server, "get_hashkey", AsyncMock(return_value="hash")):
+            with self.assertRaisesRegex(ValueError, "ORD_DVSN '01' is not supported"):
+                await server.call_kis_api(
+                    "overseas_stock",
+                    "order",
+                    {
+                        "ctac_tlno": "",
+                        "mgco_aptm_odno": "",
+                        "ord_dv": "buy",
+                        "ord_dvsn": "01",
+                        "ord_qty": "1",
+                        "ord_svr_dvsn_cd": "0",
+                        "ovrs_excg_cd": "NASD",
+                        "ovrs_ord_unpr": "0",
+                        "pdno": "AAPL",
+                    },
+                )
+
+        self.assertEqual(client.calls, [])
+
+    async def test_overseas_order_spec_documents_supported_divisions(self):
+        spec = await server.get_kis_api_spec("overseas_stock", "order")
+        ord_dvsn = next(param for param in spec["params"] if param["name"] == "ord_dvsn")
+
+        self.assertNotIn("01", ord_dvsn["values"])
+        self.assertIn("31", ord_dvsn["values"])
+        self.assertIn("50", ord_dvsn["values"])
+        self.assertIn("일반 시장가(01)는 지원하지 않습니다", ord_dvsn["guide"])
+
     async def test_legacy_overseas_limit_order_defaults_to_limit_division(self):
         env = {
             "KIS_APP_KEY": "app",
