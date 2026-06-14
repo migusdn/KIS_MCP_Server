@@ -1,10 +1,7 @@
-[![MseeP.ai Security Assessment Badge](https://mseep.net/pr/migusdn-kis-mcp-server-badge.png)](https://mseep.ai/app/migusdn-kis-mcp-server)
-
 # 한국투자증권 REST API MCP (Model Context Protocol)
 
 [![Python 3.13+](https://img.shields.io/badge/python-3.13+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Verified on MseeP](https://mseep.ai/badge.svg)](https://mseep.ai/app/51ce86bd-d78d-48da-8227-1e5cf29157d5)
 
 <a href="https://glama.ai/mcp/servers/@migusdn/KIS_MCP_Server">
   <img width="380" height="200" src="https://glama.ai/mcp/servers/@migusdn/KIS_MCP_Server/badge" alt="KIS REST API Server MCP server" />
@@ -302,6 +299,16 @@ uv run python -m compileall main.py server.py example.py tests
 uv run python -m unittest discover -v
 git diff --check
 ```
+
+## Contributors
+
+AI 공동작성자는 기여자 목록에서 제외했습니다.
+
+| Contributor | Role |
+|---|---|
+| [migusdn](https://github.com/migusdn) | Maintainer |
+| [mickeykim70](https://github.com/mickeykim70) | Contributor |
+| [haesam5060-arch](https://github.com/haesam5060-arch) | Contributor |
 
 ## 라이선스
 
